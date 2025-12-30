@@ -634,258 +634,258 @@ def show_backtest_results(selected_ba_rid=None):
                 st.error(f"获取回测参数失败: {e}")
                 params = {}
             
-            # 检查是否成功加载回测结果数据
-            if report_normal_df is not None and analysis_df is not None:
-                # 显示关键指标
-                st.subheader("关键指标")
-                
-                # 计算累计收益率
-                report_normal_df['cumulative_return'] = (1 + report_normal_df['return']).cumprod()
-                report_normal_df['cumulative_bench'] = (1 + report_normal_df['bench']).cumprod()
-                
-                total_return = (report_normal_df['cumulative_return'].iloc[-1] - 1) * 100
-                bench_return = (report_normal_df['cumulative_bench'].iloc[-1] - 1) * 100
-                excess_return_total = total_return - bench_return
-                
-                # 获取其他分析指标
-                annualized_return = analysis_df.loc[('excess_return_with_cost', 'annualized_return'), 'risk']
-                information_ratio = analysis_df.loc[('excess_return_with_cost', 'information_ratio'), 'risk']
-                max_drawdown = analysis_df.loc[('excess_return_with_cost', 'max_drawdown'), 'risk']
-                
-                # 创建关键指标表格数据
-                key_metrics_data = [
-                    {"指标名称": "策略总收益", "数值": f"{total_return:.2f}%"},
-                    {"指标名称": "基准总收益", "数值": f"{bench_return:.2f}%"},
-                    {"指标名称": "超额收益", "数值": f"{excess_return_total:.2f}%"},
-                    {"指标名称": "年化收益率", "数值": f"{annualized_return:.2%}"},
-                    {"指标名称": "信息比率", "数值": f"{information_ratio:.3f}"},
-                    {"指标名称": "最大回撤", "数值": f"{max_drawdown:.2%}"}
-                ]
-                
-                # 显示关键指标表格
-                key_metrics_df = pd.DataFrame(key_metrics_data)
-                st.dataframe(key_metrics_df, hide_index=True)
-                
-                # 1. 累计收益曲线对比（单独一行，占据整个宽度）
-                st.subheader("1. 累计收益曲线对比")
-                import plotly.graph_objs as go
-                fig1 = go.Figure()
-                fig1.add_trace(
-                    go.Scatter(
-                        x=report_normal_df.index,
-                        y=report_normal_df['cumulative_return'],
-                        name='策略累计收益',
-                        line=dict(color='red', width=2),
-                        hovertemplate='日期: %{x}<br>累计收益: %{y:.4f}'
-                    )
-                )
-                fig1.add_trace(
-                    go.Scatter(
-                        x=report_normal_df.index,
-                        y=report_normal_df['cumulative_bench'],
-                        name='基准累计收益',
-                        line=dict(color='blue', width=2),
-                        hovertemplate='日期: %{x}<br>基准收益: %{y:.4f}'
-                    )
-                )
-                fig1.update_layout(
-                    height=400,
-                    width=1000,
-                    showlegend=True,
-                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
-                    hovermode='x unified',
-                    template='plotly_white',
-                    yaxis_title='累计收益率'
-                )
-                st.plotly_chart(fig1, use_container_width=True)
-                
-                # 2. 日收益率对比（单独一行，占据整个宽度）
-                st.subheader("2. 日收益率对比")
-                fig2 = go.Figure()
-                fig2.add_trace(
-                    go.Scatter(
-                        x=report_normal_df.index,
-                        y=report_normal_df['return'],
-                        name='策略日收益',
-                        line=dict(color='red', width=1),
-                        opacity=0.7,
-                        hovertemplate='日期: %{x}<br>策略日收益: %{y:.4f}'
-                    )
-                )
-                fig2.add_trace(
-                    go.Scatter(
-                        x=report_normal_df.index,
-                        y=report_normal_df['bench'],
-                        name='基准日收益',
-                        line=dict(color='blue', width=1),
-                        opacity=0.7,
-                        hovertemplate='日期: %{x}<br>基准日收益: %{y:.4f}'
-                    )
-                )
-                # 添加零线
-                fig2.add_shape(
-                    type="line",
-                    x0=report_normal_df.index[0],
-                    y0=0,
-                    x1=report_normal_df.index[-1],
-                    y1=0,
-                    line=dict(color='black', width=1, dash='dash')
-                )
-                fig2.update_layout(
-                    height=400,
-                    width=1000,
-                    showlegend=True,
-                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
-                    hovermode='x unified',
-                    template='plotly_white',
-                    yaxis_title='日收益率'
-                )
-                st.plotly_chart(fig2, use_container_width=True)
-                
-                # 3. 超额收益（单独一行，占据整个宽度）
-                st.subheader("3. 超额收益")
-                excess_return = report_normal_df['return'] - report_normal_df['bench']
-                fig3 = go.Figure()
-                fig3.add_trace(
-                    go.Scatter(
-                        x=report_normal_df.index,
-                        y=excess_return,
-                        name='超额收益',
-                        line=dict(color='green', width=1.5),
-                        hovertemplate='日期: %{x}<br>超额收益: %{y:.4f}'
-                    )
-                )
-                # 添加零线
-                fig3.add_shape(
-                    type="line",
-                    x0=report_normal_df.index[0],
-                    y0=0,
-                    x1=report_normal_df.index[-1],
-                    y1=0,
-                    line=dict(color='black', width=1, dash='dash')
-                )
-                fig3.update_layout(
-                    height=400,
-                    width=1000,
-                    showlegend=True,
-                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
-                    hovermode='x unified',
-                    template='plotly_white',
-                    yaxis_title='超额收益率'
-                )
-                st.plotly_chart(fig3, use_container_width=True)
-                
-                # 4. 累计超额收益（单独一行，占据整个宽度）
-                st.subheader("4. 累计超额收益")
-                cumulative_excess = report_normal_df['cumulative_return'] - report_normal_df['cumulative_bench']
-                fig4 = go.Figure()
-                fig4.add_trace(
-                    go.Scatter(
-                        x=report_normal_df.index,
-                        y=cumulative_excess,
-                        name='累计超额收益',
-                        line=dict(color='green', width=2),
-                        hovertemplate='日期: %{x}<br>累计超额收益: %{y:.4f}'
-                    )
-                )
-                # 添加零线
-                fig4.add_shape(
-                    type="line",
-                    x0=report_normal_df.index[0],
-                    y0=0,
-                    x1=report_normal_df.index[-1],
-                    y1=0,
-                    line=dict(color='black', width=1, dash='dash')
-                )
-                fig4.update_layout(
-                    height=400,
-                    width=1000,
-                    showlegend=True,
-                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
-                    hovermode='x unified',
-                    template='plotly_white',
-                    yaxis_title='累计超额收益率'
-                )
-                st.plotly_chart(fig4, use_container_width=True)
-            else:
-                st.warning("无法加载回测结果数据，可能是回测记录不完整或路径不正确")
+            # 创建主内容区的左右两栏，左侧显示关键指标、图表和持仓，右侧显示回测相关信息
+            main_col, info_col = st.columns([2, 1])
             
-            # 显示最后一次持仓（放到最后）
-            st.subheader("最后一次持仓")
-            if positions:
-                # 获取最后一个交易日
-                last_date = list(positions.keys())[-1]
-                last_position = positions[last_date]
-                
-                # 提取股票持仓数据
-                stocks_data = []
-                
-                try:
-                    # 正确获取持仓字典：Position对象的position属性
-                    if hasattr(last_position, 'position'):
-                        pos_dict = last_position.position
-                    elif isinstance(last_position, dict):
-                        # 兼容旧版本数据格式
-                        pos_dict = last_position
-                    else:
-                        st.error(f"无法解析持仓数据，类型: {type(last_position)}")
-                        pos_dict = {}
+            # 左侧主内容区
+            with main_col:
+                # 检查是否成功加载回测结果数据
+                if report_normal_df is not None and analysis_df is not None:
+                    # 显示关键指标
+                    st.subheader("关键指标")
                     
-                    # 提取股票数据
-                    import akshare as ak
-                    stock_names = {}
+                    # 计算累计收益率
+                    report_normal_df['cumulative_return'] = (1 + report_normal_df['return']).cumprod()
+                    report_normal_df['cumulative_bench'] = (1 + report_normal_df['bench']).cumprod()
                     
-                    # 获取所有A股基本信息
-                    try:
-                        stock_info_df = ak.stock_info_a_code_name()
-                        # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
-                        stock_names = {}
-                        for _, row in stock_info_df.iterrows():
-                            code = row['code']
-                            name = row['name']
-                            # 保存不带前缀的代码映射
-                            stock_names[code] = name
-                            # 保存带SH前缀的代码映射
-                            stock_names[f"SH{code}"] = name
-                            # 保存带SZ前缀的代码映射
-                            stock_names[f"SZ{code}"] = name
-                    except Exception as e:
-                        st.warning(f"获取股票名称失败: {e}")
+                    total_return = (report_normal_df['cumulative_return'].iloc[-1] - 1) * 100
+                    bench_return = (report_normal_df['cumulative_bench'].iloc[-1] - 1) * 100
+                    excess_return_total = total_return - bench_return
                     
-                    for stock, info in pos_dict.items():
-                        if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
-                            # 获取股票名称
-                            stock_name = stock_names.get(stock, stock)
-                            stocks_data.append({
-                                '股票代码': stock,
-                                '股票名称': stock_name,
-                                '权重': float(info.get('weight', 0)),
-                                '持仓天数': int(info.get('count_day', 0)),
-                                '持仓数量': float(info.get('amount', 0)),
-                                '价格': float(info.get('price', 0)),
-                                '持仓金额': float(info.get('amount', 0)) * float(info.get('price', 0))
-                            })
+                    # 获取其他分析指标
+                    annualized_return = analysis_df.loc[('excess_return_with_cost', 'annualized_return'), 'risk']
+                    information_ratio = analysis_df.loc[('excess_return_with_cost', 'information_ratio'), 'risk']
+                    max_drawdown = analysis_df.loc[('excess_return_with_cost', 'max_drawdown'), 'risk']
                     
-                except Exception as e:
-                    st.error(f"处理持仓数据时出错: {e}")
-                    import traceback
-                    st.error(traceback.format_exc())
-                
-                if stocks_data:
-                    df_positions = pd.DataFrame(stocks_data)
-                    st.dataframe(df_positions)
+                    # 创建关键指标表格数据
+                    key_metrics_data = [
+                        {"指标名称": "策略总收益", "数值": f"{total_return:.2f}%"},
+                        {"指标名称": "基准总收益", "数值": f"{bench_return:.2f}%"},
+                        {"指标名称": "超额收益", "数值": f"{excess_return_total:.2f}%"},
+                        {"指标名称": "年化收益率", "数值": f"{annualized_return:.2%}"},
+                        {"指标名称": "信息比率", "数值": f"{information_ratio:.3f}"},
+                        {"指标名称": "最大回撤", "数值": f"{max_drawdown:.2%}"}
+                    ]
+                    
+                    # 显示关键指标表格
+                    key_metrics_df = pd.DataFrame(key_metrics_data)
+                    st.dataframe(key_metrics_df, hide_index=True)
+                    
+                    # 1. 累计收益曲线对比（单独一行）
+                    st.subheader("1. 累计收益曲线对比")
+                    import plotly.graph_objs as go
+                    fig1 = go.Figure()
+                    fig1.add_trace(
+                        go.Scatter(
+                            x=report_normal_df.index,
+                            y=report_normal_df['cumulative_return'],
+                            name='策略累计收益',
+                            line=dict(color='red', width=2),
+                            hovertemplate='日期: %{x}<br>累计收益: %{y:.4f}'
+                        )
+                    )
+                    fig1.add_trace(
+                        go.Scatter(
+                            x=report_normal_df.index,
+                            y=report_normal_df['cumulative_bench'],
+                            name='基准累计收益',
+                            line=dict(color='blue', width=2),
+                            hovertemplate='日期: %{x}<br>基准收益: %{y:.4f}'
+                        )
+                    )
+                    fig1.update_layout(
+                        height=400,
+                        width=1000,
+                        showlegend=True,
+                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        hovermode='x unified',
+                        template='plotly_white',
+                        yaxis_title='累计收益率'
+                    )
+                    st.plotly_chart(fig1, use_container_width=True)
+                    
+                    # 2. 日收益率对比（单独一行）
+                    st.subheader("2. 日收益率对比")
+                    fig2 = go.Figure()
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=report_normal_df.index,
+                            y=report_normal_df['return'],
+                            name='策略日收益',
+                            line=dict(color='red', width=1),
+                            opacity=0.7,
+                            hovertemplate='日期: %{x}<br>策略日收益: %{y:.4f}'
+                        )
+                    )
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=report_normal_df.index,
+                            y=report_normal_df['bench'],
+                            name='基准日收益',
+                            line=dict(color='blue', width=1),
+                            opacity=0.7,
+                            hovertemplate='日期: %{x}<br>基准日收益: %{y:.4f}'
+                        )
+                    )
+                    # 添加零线
+                    fig2.add_shape(
+                        type="line",
+                        x0=report_normal_df.index[0],
+                        y0=0,
+                        x1=report_normal_df.index[-1],
+                        y1=0,
+                        line=dict(color='black', width=1, dash='dash')
+                    )
+                    fig2.update_layout(
+                        height=400,
+                        width=1000,
+                        showlegend=True,
+                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        hovermode='x unified',
+                        template='plotly_white',
+                        yaxis_title='日收益率'
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+                    
+                    # 3. 超额收益（单独一行）
+                    st.subheader("3. 超额收益")
+                    excess_return = report_normal_df['return'] - report_normal_df['bench']
+                    fig3 = go.Figure()
+                    fig3.add_trace(
+                        go.Scatter(
+                            x=report_normal_df.index,
+                            y=excess_return,
+                            name='超额收益',
+                            line=dict(color='green', width=1.5),
+                            hovertemplate='日期: %{x}<br>超额收益: %{y:.4f}'
+                        )
+                    )
+                    # 添加零线
+                    fig3.add_shape(
+                        type="line",
+                        x0=report_normal_df.index[0],
+                        y0=0,
+                        x1=report_normal_df.index[-1],
+                        y1=0,
+                        line=dict(color='black', width=1, dash='dash')
+                    )
+                    fig3.update_layout(
+                        height=400,
+                        width=1000,
+                        showlegend=True,
+                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        hovermode='x unified',
+                        template='plotly_white',
+                        yaxis_title='超额收益率'
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
+                    
+                    # 4. 累计超额收益（单独一行）
+                    st.subheader("4. 累计超额收益")
+                    cumulative_excess = report_normal_df['cumulative_return'] - report_normal_df['cumulative_bench']
+                    fig4 = go.Figure()
+                    fig4.add_trace(
+                        go.Scatter(
+                            x=report_normal_df.index,
+                            y=cumulative_excess,
+                            name='累计超额收益',
+                            line=dict(color='green', width=2),
+                            hovertemplate='日期: %{x}<br>累计超额收益: %{y:.4f}'
+                        )
+                    )
+                    # 添加零线
+                    fig4.add_shape(
+                        type="line",
+                        x0=report_normal_df.index[0],
+                        y0=0,
+                        x1=report_normal_df.index[-1],
+                        y1=0,
+                        line=dict(color='black', width=1, dash='dash')
+                    )
+                    fig4.update_layout(
+                        height=400,
+                        width=1000,
+                        showlegend=True,
+                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        hovermode='x unified',
+                        template='plotly_white',
+                        yaxis_title='累计超额收益率'
+                    )
+                    st.plotly_chart(fig4, use_container_width=True)
                 else:
-                    st.write("没有找到股票持仓数据")
-            else:
-                st.write("没有找到持仓数据")
+                    st.warning("无法加载回测结果数据，可能是回测记录不完整或路径不正确")
+                
+                # 显示最后一次持仓（放到最后）
+                st.subheader("最后一次持仓")
+                if positions:
+                    # 获取最后一个交易日
+                    last_date = list(positions.keys())[-1]
+                    last_position = positions[last_date]
+                    
+                    # 提取股票持仓数据
+                    stocks_data = []
+                    
+                    try:
+                        # 正确获取持仓字典：Position对象的position属性
+                        if hasattr(last_position, 'position'):
+                            pos_dict = last_position.position
+                        elif isinstance(last_position, dict):
+                            # 兼容旧版本数据格式
+                            pos_dict = last_position
+                        else:
+                            st.error(f"无法解析持仓数据，类型: {type(last_position)}")
+                            pos_dict = {}
+                        
+                        # 提取股票数据
+                        import akshare as ak
+                        stock_names = {}
+                        
+                        # 获取所有A股基本信息
+                        try:
+                            stock_info_df = ak.stock_info_a_code_name()
+                            # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
+                            stock_names = {}
+                            for _, row in stock_info_df.iterrows():
+                                code = row['code']
+                                name = row['name']
+                                # 保存不带前缀的代码映射
+                                stock_names[code] = name
+                                # 保存带SH前缀的代码映射
+                                stock_names[f"SH{code}"] = name
+                                # 保存带SZ前缀的代码映射
+                                stock_names[f"SZ{code}"] = name
+                        except Exception as e:
+                            st.warning(f"获取股票名称失败: {e}")
+                        
+                        for stock, info in pos_dict.items():
+                            if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
+                                # 获取股票名称
+                                stock_name = stock_names.get(stock, stock)
+                                stocks_data.append({
+                                    '股票代码': stock,
+                                    '股票名称': stock_name,
+                                    '权重': float(info.get('weight', 0)),
+                                    '持仓天数': int(info.get('count_day', 0)),
+                                    '持仓数量': float(info.get('amount', 0)),
+                                    '价格': float(info.get('price', 0)),
+                                    '持仓金额': float(info.get('amount', 0)) * float(info.get('price', 0))
+                                })
+                        
+                    except Exception as e:
+                        st.error(f"处理持仓数据时出错: {e}")
+                        import traceback
+                        st.error(traceback.format_exc())
+                    
+                    if stocks_data:
+                        df_positions = pd.DataFrame(stocks_data)
+                        st.dataframe(df_positions)
+                    else:
+                        st.write("没有找到股票持仓数据")
+                else:
+                    st.write("没有找到持仓数据")
             
-            # 显示相关信息（放在图表下方）
-            st.subheader("回测相关信息")
-            # 创建两栏布局显示信息
-            info_col1, info_col2 = st.columns(2)
-            
-            # 左侧信息栏
-            with info_col1:
+            # 右侧信息区
+            with info_col:
                 # 显示当前使用的训练记录（从回测记录中获取）
                 st.subheader("当前使用的训练记录")
                 try:
@@ -943,9 +943,7 @@ def show_backtest_results(selected_ba_rid=None):
                     st.markdown(f"**回测市场**: {backtest_market}")
                 except Exception as e:
                     st.error(f"获取回测记录信息失败: {e}")
-            
-            # 右侧信息栏
-            with info_col2:
+                
                 # 显示使用的参数（从回测记录中获取）
                 st.subheader("使用的参数")
                 
