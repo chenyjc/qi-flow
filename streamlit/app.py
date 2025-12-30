@@ -527,20 +527,17 @@ with st.sidebar:
             # 获取选择的记录ID
             selected_rid = recorder_options[selected_option]
             
-            # 获取该训练记录的参数，包括数据集信息
+            # 获取该训练记录的参数，包括市场信息
             try:
                 # 获取训练记录对象
                 train_recorder = R.get_recorder(recorder_id=selected_rid, experiment_name=experiment_name)
                 # 获取记录中的参数
                 train_params = train_recorder.list_params()
-                # 提取数据集信息
-                dataset_info = train_params.get('dataset', '未知')
-                if isinstance(dataset_info, dict):
-                    # 如果是字典，提取关键信息
-                    dataset_module = dataset_info.get('module_path', '未知')
-                    st.write(f"已选择记录: {selected_rid}, 数据集: {dataset_module}")
-                else:
-                    st.write(f"已选择记录: {selected_rid}, 数据集: {dataset_info}")
+                # 提取市场信息，尝试多种可能的参数名
+                market_info = train_params.get('market', 
+                                             train_params.get('train_market', 
+                                                          train_params.get('backtest_market', '未知')))
+                st.write(f"已选择记录: {selected_rid}, 市场: {market_info}")
             except Exception as e:
                 # 如果获取失败，只显示记录ID
                 st.write(f"已选择记录: {selected_rid}")
@@ -583,20 +580,17 @@ with st.sidebar:
             # 获取选择的回测记录ID，并保存到全局变量中
             selected_ba_rid = backtest_recorder_options[selected_backtest_option]
             
-            # 获取该回测记录的参数，包括数据集信息
+            # 获取该回测记录的参数，包括市场信息
             try:
                 # 获取回测记录对象
                 backtest_recorder = R.get_recorder(recorder_id=selected_ba_rid, experiment_name="backtest_analysis")
                 # 获取记录中的参数
                 backtest_params = backtest_recorder.list_params()
-                # 提取数据集信息
-                dataset_info = backtest_params.get('dataset', '未知')
-                if isinstance(dataset_info, dict):
-                    # 如果是字典，提取关键信息
-                    dataset_module = dataset_info.get('module_path', '未知')
-                    st.write(f"已选择回测记录: {selected_ba_rid}, 数据集: {dataset_module}")
-                else:
-                    st.write(f"已选择回测记录: {selected_ba_rid}, 数据集: {dataset_info}")
+                # 提取市场信息，尝试多种可能的参数名
+                market_info = backtest_params.get('market', 
+                                             backtest_params.get('train_market', 
+                                                          backtest_params.get('backtest_market', '未知')))
+                st.write(f"已选择回测记录: {selected_ba_rid}, 市场: {market_info}")
             except Exception as e:
                 # 如果获取失败，只显示记录ID
                 st.write(f"已选择回测记录: {selected_ba_rid}")
