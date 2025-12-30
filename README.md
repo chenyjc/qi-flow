@@ -2,7 +2,7 @@
 title: QI-Flow
 emoji: 🚀
 colorFrom: red
-colorTo: red
+colorTo: green
 sdk: docker
 app_port: 8501
 tags:
