@@ -49,25 +49,3 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-  deploy-to-huggingface:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        ref: main
-
-    - name: Deploy to Hugging Face Spaces
-      uses: huggingface/huggingface-setup-space@v1
-      with:
-        space_name: ${{ secrets.HUGGINGFACE_SPACE_NAME }}
-        space_token: ${{ secrets.HUGGINGFACE_TOKEN }}
-        space_region: us
-        space_sdk: docker
-        dockerfile_path: ./Dockerfile
-        docker_build_args: |
-          REPO_URL=${{ github.repositoryUrl }}
-          COMMIT_SHA=${{ github.sha }}
-        verbose: true
