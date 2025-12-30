@@ -118,7 +118,7 @@ train_benchmark = "SH000300"
 backtest_market = "csi300"  # 默认选择csi300
 backtest_benchmark = "SH000300"
 
-train_start_date = pd.to_datetime("2015-01-01").date()
+train_start_date = pd.to_datetime("2008-01-01").date()
 train_end_date = (pd.Timestamp.now() - pd.DateOffset(years=1)).date()
 valid_start_date = (pd.Timestamp.now() - pd.DateOffset(years=1)).date()
 valid_end_date = (pd.Timestamp.now() - pd.DateOffset(months=3)).date()
@@ -137,7 +137,7 @@ colsample_bytree = 0.8879
 
 initial_account = 500000
 topk = 5
-n_drop = 2
+n_drop = 1
 strategy_type = "TopkDropoutStrategy"
 
 experiment_name = "train_model"
@@ -444,7 +444,7 @@ with st.sidebar:
         st.subheader("训练时间范围")
         # 动态计算日期范围
         today = pd.Timestamp.now().normalize()
-        train_start = pd.to_datetime("2015-01-01")  # 固定从2015-01-01开始
+        train_start = pd.to_datetime("2008-01-01")  # 固定从2008-01-01开始
         valid_start = today - pd.DateOffset(years=1)  # 最近一年
         test_start = today - pd.DateOffset(months=3)  # 最近三个月
         
@@ -489,7 +489,7 @@ with st.sidebar:
         st.subheader("回测参数配置")
         initial_account = st.number_input("初始资金", min_value=100000, max_value=1000000000, value=initial_account, step=1000000)  # 最小值改为10万，默认值改为50万
         topk = st.slider("Topk", 1, 100, topk)  # 最小值改为1，默认值改为5
-        n_drop = st.slider("每次调仓卖出数量", 1, 20, n_drop)  # 调整为2
+        n_drop = st.slider("每次调仓卖出数量", 1, 20, n_drop)  # 调整为1
         # 策略类型（移到回测相关组）
         strategy_type = st.selectbox("策略类型", ["TopkDropoutStrategy", "WeightStrategyBase"])
         
@@ -526,7 +526,24 @@ with st.sidebar:
             
             # 获取选择的记录ID
             selected_rid = recorder_options[selected_option]
-            st.write(f"已选择记录: {selected_rid}")
+            
+            # 获取该训练记录的参数，包括数据集信息
+            try:
+                # 获取训练记录对象
+                train_recorder = R.get_recorder(recorder_id=selected_rid, experiment_name=experiment_name)
+                # 获取记录中的参数
+                train_params = train_recorder.list_params()
+                # 提取数据集信息
+                dataset_info = train_params.get('dataset', '未知')
+                if isinstance(dataset_info, dict):
+                    # 如果是字典，提取关键信息
+                    dataset_module = dataset_info.get('module_path', '未知')
+                    st.write(f"已选择记录: {selected_rid}, 数据集: {dataset_module}")
+                else:
+                    st.write(f"已选择记录: {selected_rid}, 数据集: {dataset_info}")
+            except Exception as e:
+                # 如果获取失败，只显示记录ID
+                st.write(f"已选择记录: {selected_rid}")
         else:
             st.warning("没有找到训练记录，请先训练模型！")
             selected_rid = None
@@ -565,7 +582,24 @@ with st.sidebar:
             
             # 获取选择的回测记录ID，并保存到全局变量中
             selected_ba_rid = backtest_recorder_options[selected_backtest_option]
-            st.write(f"已选择回测记录: {selected_ba_rid}")
+            
+            # 获取该回测记录的参数，包括数据集信息
+            try:
+                # 获取回测记录对象
+                backtest_recorder = R.get_recorder(recorder_id=selected_ba_rid, experiment_name="backtest_analysis")
+                # 获取记录中的参数
+                backtest_params = backtest_recorder.list_params()
+                # 提取数据集信息
+                dataset_info = backtest_params.get('dataset', '未知')
+                if isinstance(dataset_info, dict):
+                    # 如果是字典，提取关键信息
+                    dataset_module = dataset_info.get('module_path', '未知')
+                    st.write(f"已选择回测记录: {selected_ba_rid}, 数据集: {dataset_module}")
+                else:
+                    st.write(f"已选择回测记录: {selected_ba_rid}, 数据集: {dataset_info}")
+            except Exception as e:
+                # 如果获取失败，只显示记录ID
+                st.write(f"已选择回测记录: {selected_ba_rid}")
         else:
             st.write("暂无回测记录，请先执行回测")
     
@@ -750,6 +784,8 @@ def show_backtest_results(selected_ba_rid=None):
                     # 获取最后一个交易日
                     last_date = list(positions.keys())[-1]
                     last_position = positions[last_date]
+                    # 显示持仓日期
+                    st.write(f"持仓日期: {last_date.strftime('%Y-%m-%d')}")
                     
                     # 提取股票持仓数据
                     stocks_data = []
@@ -786,42 +822,71 @@ def show_backtest_results(selected_ba_rid=None):
                         except Exception as e:
                             st.warning(f"获取股票名称失败，将使用股票代码作为名称: {e}")
                             # 创建简单的映射：使用股票代码作为名称
-                            for stock in pos_dict.keys():
-                                if stock not in ['cash', 'now_account_value']:
-                                    stock_names[stock] = stock
-                                    # 为不同格式的代码创建映射
-                                    if stock.startswith('SH') or stock.startswith('SZ'):
-                                        # 同时添加不带前缀的映射
-                                        stock_names[stock[2:]] = stock[2:]
-                                    else:
-                                        # 同时添加带前缀的映射
-                                        stock_names[f"SH{stock}"] = stock
-                                        stock_names[f"SZ{stock}"] = stock
+                            stock_keys = [stock for stock in pos_dict.keys() if stock not in ['cash', 'now_account_value']]
+                            for stock in stock_keys:
+                                stock_names[stock] = stock
+                                # 为不同格式的代码创建映射
+                                if stock.startswith('SH') or stock.startswith('SZ'):
+                                    # 同时添加不带前缀的映射
+                                    stock_names[stock[2:]] = stock[2:]
+                                else:
+                                    # 同时添加带前缀的映射
+                                    stock_names[f"SH{stock}"] = stock
+                                    stock_names[f"SZ{stock}"] = stock
                         
-                        for stock, info in pos_dict.items():
-                            if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
+                        # 遍历持仓数据
+                        stock_keys = [stock for stock in pos_dict.keys() if stock not in ['cash', 'now_account_value']]
+                        
+                        for stock in stock_keys:
+                            info = pos_dict[stock]
+                            
+                            # 检查info是否为字典类型
+                            if isinstance(info, dict):
                                 # 获取股票名称
                                 stock_name = stock_names.get(stock, stock)
                                 
                                 # 计算盈利情况
-                                # 假设当前持仓信息中包含买入价格（avg_price）和当前价格（price）
                                 current_price = float(info.get('price', 0))
-                                avg_price = float(info.get('avg_price', 0))  # 平均买入价格
                                 amount = float(info.get('amount', 0))  # 持仓数量
+                                count_day = int(info.get('count_day', 0))  # 持仓天数
+                                
+                                # 从QLib数据集获取开仓日的价格作为成本价
+                                # 计算开仓日：持仓日期减去持仓天数
+                                avg_price = current_price
+                                try:
+                                    # 获取开仓日期
+                                    open_date = last_date - pd.DateOffset(days=count_day)
+                                    
+                                    # 使用QLib的D.features()获取开仓日的价格，注意字段名是 '$close'
+                                    start_date = open_date - pd.DateOffset(days=2)
+                                    end_date = open_date + pd.DateOffset(days=2)
+                                    
+                                    price_data = D.features(
+                                        instruments=[stock],
+                                        fields=['$close'],
+                                        start_time=start_date.strftime('%Y-%m-%d'),
+                                        end_time=end_date.strftime('%Y-%m-%d')
+                                    )
+                                    
+                                    if not price_data.empty:
+                                        # 查找最接近开仓日期的价格
+                                        date_diffs = abs(price_data.index.get_level_values('datetime') - open_date)
+                                        min_diff_idx = date_diffs.argmin()
+                                        avg_price = float(price_data.iloc[min_diff_idx]['$close'])
+                                except Exception as e:
+                                    # 如果获取价格失败，使用当前价格作为成本价
+                                    pass
                                 
                                 # 计算盈利金额和收益率
-                                if avg_price > 0:
-                                    profit = (current_price - avg_price) * amount
-                                    profit_rate = (current_price - avg_price) / avg_price * 100
-                                else:
-                                    profit = 0
-                                    profit_rate = 0
+                                profit = (current_price - avg_price) * amount if avg_price > 0 else 0
+                                profit_rate = (current_price - avg_price) / avg_price * 100 if avg_price > 0 else 0
                                 
+                                # 添加到stocks_data
                                 stocks_data.append({
                                     '股票代码': stock,
                                     '股票名称': stock_name,
                                     '权重': float(info.get('weight', 0)),
-                                    '持仓天数': int(info.get('count_day', 0)),
+                                    '持仓天数': count_day,
                                     '持仓数量': amount,
                                     '成本价': avg_price,
                                     '当前价': current_price,
@@ -829,12 +894,15 @@ def show_backtest_results(selected_ba_rid=None):
                                     '盈利金额': profit,
                                     '收益率': profit_rate
                                 })
+                            else:
+                                st.write(f"调试信息：股票{stock}的信息不是字典类型，跳过处理")
                         
                     except Exception as e:
                         st.error(f"处理持仓数据时出错: {e}")
                         import traceback
                         st.error(traceback.format_exc())
                     
+                    # 显示最终结果
                     if stocks_data:
                         df_positions = pd.DataFrame(stocks_data)
                         st.dataframe(df_positions)
