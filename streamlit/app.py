@@ -670,7 +670,80 @@ def show_backtest_results(selected_ba_rid=None):
                     # 显示关键指标表格
                     key_metrics_df = pd.DataFrame(key_metrics_data)
                     st.dataframe(key_metrics_df, hide_index=True)
+                else:
+                    st.warning("无法加载回测结果数据，可能是回测记录不完整或路径不正确")
+                
+                # 显示最后一次持仓（放到累计收益曲线对比上面）
+                st.subheader("最后一次持仓")
+                if positions:
+                    # 获取最后一个交易日
+                    last_date = list(positions.keys())[-1]
+                    last_position = positions[last_date]
                     
+                    # 提取股票持仓数据
+                    stocks_data = []
+                    
+                    try:
+                        # 正确获取持仓字典：Position对象的position属性
+                        if hasattr(last_position, 'position'):
+                            pos_dict = last_position.position
+                        elif isinstance(last_position, dict):
+                            # 兼容旧版本数据格式
+                            pos_dict = last_position
+                        else:
+                            st.error(f"无法解析持仓数据，类型: {type(last_position)}")
+                            pos_dict = {}
+                        
+                        # 提取股票数据
+                        import akshare as ak
+                        stock_names = {}
+                        
+                        # 获取所有A股基本信息
+                        try:
+                            stock_info_df = ak.stock_info_a_code_name()
+                            # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
+                            stock_names = {}
+                            for _, row in stock_info_df.iterrows():
+                                code = row['code']
+                                name = row['name']
+                                # 保存不带前缀的代码映射
+                                stock_names[code] = name
+                                # 保存带SH前缀的代码映射
+                                stock_names[f"SH{code}"] = name
+                                # 保存带SZ前缀的代码映射
+                                stock_names[f"SZ{code}"] = name
+                        except Exception as e:
+                            st.warning(f"获取股票名称失败: {e}")
+                        
+                        for stock, info in pos_dict.items():
+                            if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
+                                # 获取股票名称
+                                stock_name = stock_names.get(stock, stock)
+                                stocks_data.append({
+                                    '股票代码': stock,
+                                    '股票名称': stock_name,
+                                    '权重': float(info.get('weight', 0)),
+                                    '持仓天数': int(info.get('count_day', 0)),
+                                    '持仓数量': float(info.get('amount', 0)),
+                                    '价格': float(info.get('price', 0)),
+                                    '持仓金额': float(info.get('amount', 0)) * float(info.get('price', 0))
+                                })
+                        
+                    except Exception as e:
+                        st.error(f"处理持仓数据时出错: {e}")
+                        import traceback
+                        st.error(traceback.format_exc())
+                    
+                    if stocks_data:
+                        df_positions = pd.DataFrame(stocks_data)
+                        st.dataframe(df_positions)
+                    else:
+                        st.write("没有找到股票持仓数据")
+                else:
+                    st.write("没有找到持仓数据")
+                
+                # 如果回测结果数据可用，显示图表
+                if report_normal_df is not None and analysis_df is not None:
                     # 1. 累计收益曲线对比（单独一行）
                     st.subheader("1. 累计收益曲线对比")
                     import plotly.graph_objs as go
@@ -812,77 +885,6 @@ def show_backtest_results(selected_ba_rid=None):
                         yaxis_title='累计超额收益率'
                     )
                     st.plotly_chart(fig4, use_container_width=True)
-                else:
-                    st.warning("无法加载回测结果数据，可能是回测记录不完整或路径不正确")
-                
-                # 显示最后一次持仓（放到最后）
-                st.subheader("最后一次持仓")
-                if positions:
-                    # 获取最后一个交易日
-                    last_date = list(positions.keys())[-1]
-                    last_position = positions[last_date]
-                    
-                    # 提取股票持仓数据
-                    stocks_data = []
-                    
-                    try:
-                        # 正确获取持仓字典：Position对象的position属性
-                        if hasattr(last_position, 'position'):
-                            pos_dict = last_position.position
-                        elif isinstance(last_position, dict):
-                            # 兼容旧版本数据格式
-                            pos_dict = last_position
-                        else:
-                            st.error(f"无法解析持仓数据，类型: {type(last_position)}")
-                            pos_dict = {}
-                        
-                        # 提取股票数据
-                        import akshare as ak
-                        stock_names = {}
-                        
-                        # 获取所有A股基本信息
-                        try:
-                            stock_info_df = ak.stock_info_a_code_name()
-                            # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
-                            stock_names = {}
-                            for _, row in stock_info_df.iterrows():
-                                code = row['code']
-                                name = row['name']
-                                # 保存不带前缀的代码映射
-                                stock_names[code] = name
-                                # 保存带SH前缀的代码映射
-                                stock_names[f"SH{code}"] = name
-                                # 保存带SZ前缀的代码映射
-                                stock_names[f"SZ{code}"] = name
-                        except Exception as e:
-                            st.warning(f"获取股票名称失败: {e}")
-                        
-                        for stock, info in pos_dict.items():
-                            if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
-                                # 获取股票名称
-                                stock_name = stock_names.get(stock, stock)
-                                stocks_data.append({
-                                    '股票代码': stock,
-                                    '股票名称': stock_name,
-                                    '权重': float(info.get('weight', 0)),
-                                    '持仓天数': int(info.get('count_day', 0)),
-                                    '持仓数量': float(info.get('amount', 0)),
-                                    '价格': float(info.get('price', 0)),
-                                    '持仓金额': float(info.get('amount', 0)) * float(info.get('price', 0))
-                                })
-                        
-                    except Exception as e:
-                        st.error(f"处理持仓数据时出错: {e}")
-                        import traceback
-                        st.error(traceback.format_exc())
-                    
-                    if stocks_data:
-                        df_positions = pd.DataFrame(stocks_data)
-                        st.dataframe(df_positions)
-                    else:
-                        st.write("没有找到股票持仓数据")
-                else:
-                    st.write("没有找到持仓数据")
             
             # 右侧信息区
             with info_col:
