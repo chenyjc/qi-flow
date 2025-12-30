@@ -1,20 +1,8 @@
-FROM python:3.13.5-slim
+# 基于GitHub Actions构建的image
+FROM ghcr.io/chenyjc/qi-flow:latest
 
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt ./
-COPY src/ ./src/
-
-RUN pip3 install -r requirements.txt
-
+# 暴露Streamlit默认端口（必须与原image一致）
 EXPOSE 8501
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
-
-ENTRYPOINT ["streamlit", "run", "src/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# 启动命令（与原image一致）
+ENTRYPOINT ["streamlit", "run", "streamlit/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
