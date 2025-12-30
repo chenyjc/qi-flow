@@ -109,6 +109,284 @@ def download_data():
             st.error(traceback.format_exc())
             return False
 
+# 定义全局变量以保持状态
+selected_rid = None
+selected_ba_rid = None
+
+train_market = "csi300"  # 默认选择csi300
+train_benchmark = "SH000300"
+backtest_market = "csi300"  # 默认选择csi300
+backtest_benchmark = "SH000300"
+
+train_start_date = pd.to_datetime("2015-01-01").date()
+train_end_date = (pd.Timestamp.now() - pd.DateOffset(years=1)).date()
+valid_start_date = (pd.Timestamp.now() - pd.DateOffset(years=1)).date()
+valid_end_date = (pd.Timestamp.now() - pd.DateOffset(months=3)).date()
+test_start_date = (pd.Timestamp.now() - pd.DateOffset(months=3)).date()
+test_end_date = pd.Timestamp.now().date()
+
+backtest_start_date = (pd.Timestamp.now() - pd.DateOffset(months=3)).date()
+backtest_end_date = pd.Timestamp.now().date()
+
+model_type = "LGBModel"
+lr = 0.0421
+max_depth = 8
+num_leaves = 210
+subsample = 0.8789
+colsample_bytree = 0.8879
+
+initial_account = 500000
+topk = 5
+n_drop = 2
+strategy_type = "TopkDropoutStrategy"
+
+experiment_name = "train_model"
+
+# 训练模型函数
+def train_model():
+    """训练模型并返回训练记录ID"""
+    # 记录训练开始时间
+    train_start_time = pd.Timestamp.now()
+    rid = None
+    
+    # 使用全局变量，不需要显式global声明
+    with st.spinner("正在训练模型..."):
+        try:
+            # 数据处理配置
+            data_handler_config = {
+                "start_time": train_start_date.strftime("%Y-%m-%d"),
+                "end_time": test_end_date.strftime("%Y-%m-%d"),  # 使用测试集结束日期
+                "fit_start_time": train_start_date.strftime("%Y-%m-%d"),
+                "fit_end_time": valid_end_date.strftime("%Y-%m-%d"),
+                "instruments": train_market,  # 使用训练专用市场
+            }
+            
+            # 构建任务配置
+            task = {
+                "model": {
+                    "class": model_type,
+                    "module_path": "qlib.contrib.model.gbdt",
+                    "kwargs": {
+                        "loss": "mse",
+                        "colsample_bytree": colsample_bytree,
+                        "learning_rate": lr,
+                        "subsample": subsample,
+                        "lambda_l1": 205.6999,
+                        "lambda_l2": 580.9768,
+                        "max_depth": max_depth,
+                        "num_leaves": num_leaves,
+                        "num_threads": 20,
+                    },
+                },
+                "dataset": {
+                    "class": "DatasetH",
+                    "module_path": "qlib.data.dataset",
+                    "kwargs": {
+                        "handler": {
+                            "class": "Alpha158",
+                            "module_path": "qlib.contrib.data.handler",
+                            "kwargs": data_handler_config,
+                        },
+                        "segments": {
+                            "train": (train_start_date.strftime("%Y-%m-%d"), train_end_date.strftime("%Y-%m-%d")),
+                            "valid": (valid_start_date.strftime("%Y-%m-%d"), valid_end_date.strftime("%Y-%m-%d")),
+                            "test": (test_start_date.strftime("%Y-%m-%d"), test_end_date.strftime("%Y-%m-%d")),  # 使用测试集日期
+                        },
+                    },
+                },
+            }
+            
+            # 初始化模型和数据集
+            model = init_instance_by_config(task["model"])
+            dataset = init_instance_by_config(task["dataset"])
+            
+            # 训练模型
+            with R.start(experiment_name="train_model"):
+                # 保存训练参数
+                R.log_params(
+                    # 训练基础配置
+                    market=train_market,
+                    benchmark=train_benchmark,
+                    
+                    # 时间范围
+                    train_start_date=train_start_date.strftime("%Y-%m-%d"),
+                    train_end_date=train_end_date.strftime("%Y-%m-%d"),
+                    valid_start_date=valid_start_date.strftime("%Y-%m-%d"),
+                    valid_end_date=valid_end_date.strftime("%Y-%m-%d"),
+                    test_start_date=test_start_date.strftime("%Y-%m-%d"),
+                    test_end_date=test_end_date.strftime("%Y-%m-%d"),
+                    
+                    # 模型参数
+                    model_type=model_type,
+                    lr=lr,
+                    max_depth=max_depth,
+                    num_leaves=num_leaves,
+                    subsample=subsample,
+                    colsample_bytree=colsample_bytree,
+                    
+                    # 任务配置
+                    **flatten_dict(task)
+                )
+                model.fit(dataset)
+                R.save_objects(trained_model=model)
+                rid = R.get_recorder().id
+            
+            # 记录训练结束时间
+            train_end_time = pd.Timestamp.now()
+            train_duration = train_end_time - train_start_time
+            
+            st.success(f"模型训练完成！Recorder ID: {rid}")
+            st.success(f"训练耗时: {train_duration.total_seconds():.2f} 秒")
+            
+        except Exception as e:
+            # 记录训练结束时间
+            train_end_time = pd.Timestamp.now()
+            train_duration = train_end_time - train_start_time
+            
+            st.error(f"模型训练失败: {e}")
+            st.error(f"训练耗时: {train_duration.total_seconds():.2f} 秒")
+            import traceback
+            st.error(traceback.format_exc())
+    
+    return rid
+
+# 回测模型函数
+def backtest_model():
+    """执行回测和分析"""
+    # 记录回测开始时间
+    backtest_start_time = pd.Timestamp.now()
+    ba_rid = None
+    
+    # 使用全局变量，不需要显式global声明
+    if not selected_rid:
+        st.error("未选择训练记录，无法执行回测")
+        return None
+    
+    with st.spinner("正在执行回测和分析..."):
+        try:
+            # 获取指定ID的记录器，需要同时提供实验名称
+            recorder = R.get_recorder(recorder_id=selected_rid, experiment_name=experiment_name)
+            
+            # 加载模型
+            model = recorder.load_object("trained_model")
+            
+            # 加载数据集（需要重新构建）
+            data_handler_config = {
+                "start_time": train_start_date.strftime("%Y-%m-%d"),
+                "end_time": backtest_end_date.strftime("%Y-%m-%d"),
+                "fit_start_time": train_start_date.strftime("%Y-%m-%d"),
+                "fit_end_time": valid_end_date.strftime("%Y-%m-%d"),
+                "instruments": backtest_market,  # 使用回测专用市场
+            }
+            
+            dataset = {
+                "class": "DatasetH",
+                "module_path": "qlib.data.dataset",
+                "kwargs": {
+                    "handler": {
+                        "class": "Alpha158",
+                        "module_path": "qlib.contrib.data.handler",
+                        "kwargs": data_handler_config,
+                    },
+                    "segments": {
+                        "train": (train_start_date.strftime("%Y-%m-%d"), train_end_date.strftime("%Y-%m-%d")),
+                        "valid": (valid_start_date.strftime("%Y-%m-%d"), valid_end_date.strftime("%Y-%m-%d")),
+                        "test": (backtest_start_date.strftime("%Y-%m-%d"), backtest_end_date.strftime("%Y-%m-%d")),
+                    },
+                },
+            }
+            
+            dataset = init_instance_by_config(dataset)
+            
+            # 回测配置
+            port_analysis_config = {
+                "executor": {
+                    "class": "SimulatorExecutor",
+                    "module_path": "qlib.backtest.executor",
+                    "kwargs": {
+                        "time_per_step": "day",  # 固定为day周期，数据不支持其他周期
+                        "generate_portfolio_metrics": True,
+                    },
+                },
+                "strategy": {
+                    "class": strategy_type,
+                    "module_path": "qlib.contrib.strategy.signal_strategy",
+                    "kwargs": {
+                        "model": model,
+                        "dataset": dataset,
+                        "topk": topk,
+                        "n_drop": n_drop,
+                    },
+                },
+                "backtest": {
+                    "start_time": backtest_start_date.strftime("%Y-%m-%d"),
+                    "end_time": backtest_end_date.strftime("%Y-%m-%d"),
+                    "account": initial_account,
+                    "benchmark": backtest_benchmark,  # 使用回测专用基准
+                    "exchange_kwargs": {
+                        "freq": "day",  # 固定为day周期，数据不支持其他周期
+                        "limit_threshold": 0.095,
+                        "deal_price": "close",
+                        "open_cost": 0.0005,
+                        "close_cost": 0.0015,
+                        "min_cost": 5,
+                    },
+                },
+            }
+            
+            # 执行回测和分析
+            with R.start(experiment_name="backtest_analysis"):
+                recorder = R.get_recorder()
+                ba_rid = recorder.id
+                
+                # 确保selected_rid被正确获取
+                if selected_rid:
+                    st.write(f"使用训练记录ID: {selected_rid} 执行回测")
+                else:
+                    st.warning("未找到训练记录ID，回测可能会失败")
+                
+                # 保存训练记录ID和参数到回测记录中
+                # 使用当前recorder对象的log_params方法，确保参数被正确保存
+                recorder.log_params(
+                    # 训练记录ID
+                    train_recorder_id=str(selected_rid) if selected_rid else "",
+                    
+                    # 回测参数
+                    backtest_market=backtest_market,
+                    backtest_benchmark=backtest_benchmark,
+                    backtest_start_date=backtest_start_date.strftime("%Y-%m-%d"),
+                    backtest_end_date=backtest_end_date.strftime("%Y-%m-%d"),
+                    initial_account=initial_account,
+                    topk=topk,
+                    n_drop=n_drop,
+                    strategy_type=strategy_type
+                )
+                
+                sr = SignalRecord(model, dataset, recorder)
+                sr.generate()
+                
+                par = PortAnaRecord(recorder, port_analysis_config, "day")
+                par.generate()
+            
+            # 记录回测结束时间
+            backtest_end_time = pd.Timestamp.now()
+            backtest_duration = backtest_end_time - backtest_start_time
+            
+            st.success(f"回测和分析完成！Recorder ID: {ba_rid}")
+            st.success(f"回测耗时: {backtest_duration.total_seconds():.2f} 秒")
+            
+        except Exception as e:
+            # 记录回测结束时间
+            backtest_end_time = pd.Timestamp.now()
+            backtest_duration = backtest_end_time - backtest_start_time
+            
+            st.error(f"回测和分析失败: {e}")
+            st.error(f"回测耗时: {backtest_duration.total_seconds():.2f} 秒")
+            import traceback
+            st.error(traceback.format_exc())
+    
+    return ba_rid
+
 # 侧边栏 - 可折叠的配置和功能区域
 with st.sidebar:
     # 配置选项作为大标题
@@ -127,29 +405,40 @@ with st.sidebar:
         with col2:
             preview_data = st.button("预览数据")
         
+        # 全部执行按钮
+        st.markdown("---")
+        all_in_one_btn = st.button("全部执行")
+        
         # 如果点击了下载数据按钮
         if download_btn:
             download_data()
-
-# 初始化Qlib
-try:
-    # 检查Qlib是否已初始化，避免重复初始化冲突
-    if not hasattr(qlib, '_initialized') or not qlib._initialized:
-        qlib.init(provider_uri=provider_uri, region=REG_CN)
-        st.success(f"Qlib初始化成功，数据路径: {provider_uri}")
-    else:
-        st.success(f"Qlib已初始化，数据路径: {provider_uri}")
-except Exception as e:
-    st.error(f"Qlib初始化失败: {e}")
-    st.stop()
-
-# 侧边栏继续
-with st.sidebar:
+        
+        # 如果点击了全部执行按钮
+        if all_in_one_btn:
+            with st.spinner("开始执行完整流程：下载数据 → 训练 → 回测..."):
+                # 1. 下载数据
+                st.write("1. 正在下载数据...")
+                download_success = download_data()
+                
+                if download_success:
+                    # 2. 训练模型
+                    st.write("2. 正在训练模型...")
+                    selected_rid = train_model()
+                    
+                    if selected_rid:
+                        # 3. 执行回测和分析
+                        st.write("3. 正在执行回测和分析...")
+                        backtest_model()
+                        
+                        st.success("完整流程执行完成！")
+                else:
+                    st.error("数据下载失败，无法继续训练和回测。")
+    
     # 训练相关分组 - 可折叠（包含所有训练需要的参数，不与回测共享）
     with st.expander("训练相关", expanded=True):
         st.subheader("训练基础配置")
         # 训练专用的市场和基准
-        train_market = st.selectbox("训练市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=5)  # 默认选择csiall
+        train_market = st.selectbox("训练市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=1)  # 默认选择csi300
         train_benchmark = st.selectbox("训练基准指数", ["SH000300", "SH000016", "SH000852", "SH000905"])
         
         st.subheader("训练时间范围")
@@ -172,122 +461,21 @@ with st.sidebar:
         st.subheader("模型参数")
         # 训练专用的模型参数
         model_type = st.selectbox("模型类型", ["LGBModel", "XGBModel", "Linear"])
-        lr = st.slider("学习率", 0.001, 0.1, 0.0421)
-        max_depth = st.slider("最大深度", 3, 15, 8)
-        num_leaves = st.slider("叶子数量", 30, 300, 210)
-        subsample = st.slider("采样比例", 0.5, 1.0, 0.8789)
-        colsample_bytree = st.slider("列采样比例", 0.5, 1.0, 0.8879)
+        lr = st.slider("学习率", 0.001, 0.1, lr)
+        max_depth = st.slider("最大深度", 3, 15, max_depth)
+        num_leaves = st.slider("叶子数量", 30, 300, num_leaves)
+        subsample = st.slider("采样比例", 0.5, 1.0, subsample)
+        colsample_bytree = st.slider("列采样比例", 0.5, 1.0, colsample_bytree)
         
         # 训练模型按钮
         if st.button("训练模型"):
-            # 记录训练开始时间
-            train_start_time = pd.Timestamp.now()
-            
-            with st.spinner("正在训练模型..."):
-                try:
-                    # 数据处理配置
-                    data_handler_config = {
-                        "start_time": train_start_date.strftime("%Y-%m-%d"),
-                        "end_time": test_end_date.strftime("%Y-%m-%d"),  # 使用测试集结束日期
-                        "fit_start_time": train_start_date.strftime("%Y-%m-%d"),
-                        "fit_end_time": valid_end_date.strftime("%Y-%m-%d"),
-                        "instruments": train_market,  # 使用训练专用市场
-                    }
-                    
-                    # 构建任务配置
-                    task = {
-                        "model": {
-                            "class": model_type,
-                            "module_path": "qlib.contrib.model.gbdt",
-                            "kwargs": {
-                                "loss": "mse",
-                                "colsample_bytree": colsample_bytree,
-                                "learning_rate": lr,
-                                "subsample": subsample,
-                                "lambda_l1": 205.6999,
-                                "lambda_l2": 580.9768,
-                                "max_depth": max_depth,
-                                "num_leaves": num_leaves,
-                                "num_threads": 20,
-                            },
-                        },
-                        "dataset": {
-                            "class": "DatasetH",
-                            "module_path": "qlib.data.dataset",
-                            "kwargs": {
-                                "handler": {
-                                    "class": "Alpha158",
-                                    "module_path": "qlib.contrib.data.handler",
-                                    "kwargs": data_handler_config,
-                                },
-                                "segments": {
-                                    "train": (train_start_date.strftime("%Y-%m-%d"), train_end_date.strftime("%Y-%m-%d")),
-                                    "valid": (valid_start_date.strftime("%Y-%m-%d"), valid_end_date.strftime("%Y-%m-%d")),
-                                    "test": (test_start_date.strftime("%Y-%m-%d"), test_end_date.strftime("%Y-%m-%d")),  # 使用测试集日期
-                                },
-                            },
-                        },
-                    }
-                    
-                    # 初始化模型和数据集
-                    model = init_instance_by_config(task["model"])
-                    dataset = init_instance_by_config(task["dataset"])
-                    
-                    # 训练模型
-                    with R.start(experiment_name="train_model"):
-                        # 保存训练参数
-                        R.log_params(
-                            # 训练基础配置
-                            market=train_market,
-                            benchmark=train_benchmark,
-                            
-                            # 时间范围
-                            train_start_date=train_start_date.strftime("%Y-%m-%d"),
-                            train_end_date=train_end_date.strftime("%Y-%m-%d"),
-                            valid_start_date=valid_start_date.strftime("%Y-%m-%d"),
-                            valid_end_date=valid_end_date.strftime("%Y-%m-%d"),
-                            test_start_date=test_start_date.strftime("%Y-%m-%d"),
-                            test_end_date=test_end_date.strftime("%Y-%m-%d"),
-                            
-                            # 模型参数
-                            model_type=model_type,
-                            lr=lr,
-                            max_depth=max_depth,
-                            num_leaves=num_leaves,
-                            subsample=subsample,
-                            colsample_bytree=colsample_bytree,
-                            
-                            # 任务配置
-                            **flatten_dict(task)
-                        )
-                        model.fit(dataset)
-                        R.save_objects(trained_model=model)
-                        rid = R.get_recorder().id
-                    
-                    # 记录训练结束时间
-                    train_end_time = pd.Timestamp.now()
-                    train_duration = train_end_time - train_start_time
-                    
-                    st.success(f"模型训练完成！Recorder ID: {rid}")
-                    st.success(f"训练耗时: {train_duration.total_seconds():.2f} 秒")
-                    
-                except Exception as e:
-                    # 记录训练结束时间
-                    train_end_time = pd.Timestamp.now()
-                    train_duration = train_end_time - train_start_time
-                    
-                    st.error(f"模型训练失败: {e}")
-                    st.error(f"训练耗时: {train_duration.total_seconds():.2f} 秒")
-                    import traceback
-                    st.error(traceback.format_exc())
-        
-
+            selected_rid = train_model()
     
     # 回测相关分组 - 可折叠（包含所有回测需要的参数，不与训练共享）
     with st.expander("回测相关", expanded=True):
         st.subheader("回测基础配置")
         # 回测专用的市场和基准
-        backtest_market = st.selectbox("回测市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=5)  # 默认选择csiall
+        backtest_market = st.selectbox("回测市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=1)  # 默认选择csi300
         backtest_benchmark = st.selectbox("回测基准指数", ["SH000300", "SH000016", "SH000852", "SH000905"])
         
         st.subheader("回测日期配置")
@@ -299,18 +487,14 @@ with st.sidebar:
         backtest_end_date = st.date_input("回测结束日期", value=today)
         
         st.subheader("回测参数配置")
-        initial_account = st.number_input("初始资金", min_value=100000, max_value=1000000000, value=500000, step=1000000)  # 最小值改为10万，默认值改为50万
-        topk = st.slider("Topk", 1, 100, 5)  # 最小值改为1，默认值改为5
-        n_drop = st.slider("每次调仓卖出数量", 1, 20, 2)  # 调整为2
+        initial_account = st.number_input("初始资金", min_value=100000, max_value=1000000000, value=initial_account, step=1000000)  # 最小值改为10万，默认值改为50万
+        topk = st.slider("Topk", 1, 100, topk)  # 最小值改为1，默认值改为5
+        n_drop = st.slider("每次调仓卖出数量", 1, 20, n_drop)  # 调整为2
         # 策略类型（移到回测相关组）
         strategy_type = st.selectbox("策略类型", ["TopkDropoutStrategy", "WeightStrategyBase"])
         
         # 训练记录选择（移到回测相关组）
         st.subheader("训练记录")
-        
-        # 定义实验名称（全局可用）
-        experiment_name = "train_model"
-        selected_rid = None
         
         # 尝试获取所有训练记录
         recorders = []
@@ -349,131 +533,7 @@ with st.sidebar:
         
         # 回测和分析按钮
         if selected_rid and st.button("执行回测和分析"):
-            # 记录回测开始时间
-            backtest_start_time = pd.Timestamp.now()
-            
-            with st.spinner("正在执行回测和分析..."):
-                try:
-                    # 获取指定ID的记录器，需要同时提供实验名称
-                    recorder = R.get_recorder(recorder_id=selected_rid, experiment_name=experiment_name)
-                    
-                    # 加载模型
-                    model = recorder.load_object("trained_model")
-                    
-                    # 加载数据集（需要重新构建）
-                    data_handler_config = {
-                        "start_time": train_start_date.strftime("%Y-%m-%d"),
-                        "end_time": backtest_end_date.strftime("%Y-%m-%d"),
-                        "fit_start_time": train_start_date.strftime("%Y-%m-%d"),
-                        "fit_end_time": valid_end_date.strftime("%Y-%m-%d"),
-                        "instruments": backtest_market,  # 使用回测专用市场
-                    }
-                    
-                    dataset = {
-                        "class": "DatasetH",
-                        "module_path": "qlib.data.dataset",
-                        "kwargs": {
-                            "handler": {
-                                "class": "Alpha158",
-                                "module_path": "qlib.contrib.data.handler",
-                                "kwargs": data_handler_config,
-                            },
-                            "segments": {
-                                "train": (train_start_date.strftime("%Y-%m-%d"), train_end_date.strftime("%Y-%m-%d")),
-                                "valid": (valid_start_date.strftime("%Y-%m-%d"), valid_end_date.strftime("%Y-%m-%d")),
-                                "test": (backtest_start_date.strftime("%Y-%m-%d"), backtest_end_date.strftime("%Y-%m-%d")),
-                            },
-                        },
-                    }
-                    
-                    dataset = init_instance_by_config(dataset)
-                    
-                    # 回测配置
-                    port_analysis_config = {
-                        "executor": {
-                            "class": "SimulatorExecutor",
-                            "module_path": "qlib.backtest.executor",
-                            "kwargs": {
-                                "time_per_step": "day",  # 固定为day周期，数据不支持其他周期
-                                "generate_portfolio_metrics": True,
-                            },
-                        },
-                        "strategy": {
-                            "class": strategy_type,
-                            "module_path": "qlib.contrib.strategy.signal_strategy",
-                            "kwargs": {
-                                "model": model,
-                                "dataset": dataset,
-                                "topk": topk,
-                                "n_drop": n_drop,
-                            },
-                        },
-                        "backtest": {
-                            "start_time": backtest_start_date.strftime("%Y-%m-%d"),
-                            "end_time": backtest_end_date.strftime("%Y-%m-%d"),
-                            "account": initial_account,
-                            "benchmark": backtest_benchmark,  # 使用回测专用基准
-                            "exchange_kwargs": {
-                                "freq": "day",  # 固定为day周期，数据不支持其他周期
-                                "limit_threshold": 0.095,
-                                "deal_price": "close",
-                                "open_cost": 0.0005,
-                                "close_cost": 0.0015,
-                                "min_cost": 5,
-                            },
-                        },
-                    }
-                    
-                    # 执行回测和分析
-                    with R.start(experiment_name="backtest_analysis"):
-                        recorder = R.get_recorder()
-                        ba_rid = recorder.id
-                        
-                        # 确保selected_rid被正确获取
-                        if selected_rid:
-                            st.write(f"使用训练记录ID: {selected_rid} 执行回测")
-                        else:
-                            st.warning("未找到训练记录ID，回测可能会失败")
-                        
-                        # 保存训练记录ID和参数到回测记录中
-                        # 使用当前recorder对象的log_params方法，确保参数被正确保存
-                        recorder.log_params(
-                            # 训练记录ID
-                            train_recorder_id=str(selected_rid) if selected_rid else "",
-                            
-                            # 回测参数
-                            backtest_market=backtest_market,
-                            backtest_benchmark=backtest_benchmark,
-                            backtest_start_date=backtest_start_date.strftime("%Y-%m-%d"),
-                            backtest_end_date=backtest_end_date.strftime("%Y-%m-%d"),
-                            initial_account=initial_account,
-                            topk=topk,
-                            n_drop=n_drop,
-                            strategy_type=strategy_type
-                        )
-                        
-                        sr = SignalRecord(model, dataset, recorder)
-                        sr.generate()
-                        
-                        par = PortAnaRecord(recorder, port_analysis_config, "day")
-                        par.generate()
-                    
-                    # 记录回测结束时间
-                    backtest_end_time = pd.Timestamp.now()
-                    backtest_duration = backtest_end_time - backtest_start_time
-                    
-                    st.success(f"回测和分析完成！Recorder ID: {ba_rid}")
-                    st.success(f"回测耗时: {backtest_duration.total_seconds():.2f} 秒")
-                    
-                except Exception as e:
-                    # 记录回测结束时间
-                    backtest_end_time = pd.Timestamp.now()
-                    backtest_duration = backtest_end_time - backtest_start_time
-                    
-                    st.error(f"回测和分析失败: {e}")
-                    st.error(f"回测耗时: {backtest_duration.total_seconds():.2f} 秒")
-                    import traceback
-                    st.error(traceback.format_exc())
+            backtest_model()
         
         # 回测记录选择
         st.subheader("回测记录")
@@ -503,9 +563,8 @@ with st.sidebar:
                 options=list(backtest_recorder_options.keys())
             )
             
-            # 获取选择的回测记录ID，并保存到session_state中
+            # 获取选择的回测记录ID，并保存到全局变量中
             selected_ba_rid = backtest_recorder_options[selected_backtest_option]
-            st.session_state.selected_ba_rid = selected_ba_rid
             st.write(f"已选择回测记录: {selected_ba_rid}")
         else:
             st.write("暂无回测记录，请先执行回测")
@@ -526,6 +585,18 @@ with st.sidebar:
     - 训练和回测可能需要较长时间
     - 建议先使用小数据量进行测试
     """)
+
+# 初始化Qlib
+try:
+    # 检查Qlib是否已初始化，避免重复初始化冲突
+    if not hasattr(qlib, '_initialized') or not qlib._initialized:
+        qlib.init(provider_uri=provider_uri, region=REG_CN)
+        st.success(f"Qlib初始化成功，数据路径: {provider_uri}")
+    else:
+        st.success(f"Qlib已初始化，数据路径: {provider_uri}")
+except Exception as e:
+    st.error(f"Qlib初始化失败: {e}")
+    st.stop()
 
 # 主内容区
 # 数据预览功能
@@ -583,7 +654,7 @@ if 'preview_data' in locals() and preview_data:
                     st.write(f"数据结束时间: {data.index.get_level_values('datetime').max()}")
                     st.write(f"股票数量: {len(data.index.get_level_values('instrument').unique())}")
                     st.write(f"市场: {preview_market}")
-                    st.dataframe(data.tail(10), use_container_width=True)
+                    st.dataframe(data.tail(10), width='stretch')
             else:
                 st.warning("未找到股票数据")
                 
@@ -695,14 +766,14 @@ def show_backtest_results(selected_ba_rid=None):
                             pos_dict = {}
                         
                         # 提取股票数据
-                        import akshare as ak
                         stock_names = {}
                         
                         # 获取所有A股基本信息
                         try:
+                            import akshare as ak
+                            # 尝试获取股票名称数据，添加超时和异常处理
                             stock_info_df = ak.stock_info_a_code_name()
                             # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
-                            stock_names = {}
                             for _, row in stock_info_df.iterrows():
                                 code = row['code']
                                 name = row['name']
@@ -713,7 +784,19 @@ def show_backtest_results(selected_ba_rid=None):
                                 # 保存带SZ前缀的代码映射
                                 stock_names[f"SZ{code}"] = name
                         except Exception as e:
-                            st.warning(f"获取股票名称失败: {e}")
+                            st.warning(f"获取股票名称失败，将使用股票代码作为名称: {e}")
+                            # 创建简单的映射：使用股票代码作为名称
+                            for stock in pos_dict.keys():
+                                if stock not in ['cash', 'now_account_value']:
+                                    stock_names[stock] = stock
+                                    # 为不同格式的代码创建映射
+                                    if stock.startswith('SH') or stock.startswith('SZ'):
+                                        # 同时添加不带前缀的映射
+                                        stock_names[stock[2:]] = stock[2:]
+                                    else:
+                                        # 同时添加带前缀的映射
+                                        stock_names[f"SH{stock}"] = stock
+                                        stock_names[f"SZ{stock}"] = stock
                         
                         for stock, info in pos_dict.items():
                             if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
@@ -793,7 +876,7 @@ def show_backtest_results(selected_ba_rid=None):
                         template='plotly_white',
                         yaxis_title='累计收益率'
                     )
-                    st.plotly_chart(fig1, use_container_width=True)
+                    st.plotly_chart(fig1, width='stretch')
                     
                     # 2. 日收益率对比（单独一行）
                     st.subheader("2. 日收益率对比")
@@ -836,7 +919,7 @@ def show_backtest_results(selected_ba_rid=None):
                         template='plotly_white',
                         yaxis_title='日收益率'
                     )
-                    st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig2, width='stretch')
                     
                     # 3. 超额收益（单独一行）
                     st.subheader("3. 超额收益")
@@ -869,7 +952,7 @@ def show_backtest_results(selected_ba_rid=None):
                         template='plotly_white',
                         yaxis_title='超额收益率'
                     )
-                    st.plotly_chart(fig3, use_container_width=True)
+                    st.plotly_chart(fig3, width='stretch')
                     
                     # 4. 累计超额收益（单独一行）
                     st.subheader("4. 累计超额收益")
@@ -902,7 +985,7 @@ def show_backtest_results(selected_ba_rid=None):
                         template='plotly_white',
                         yaxis_title='累计超额收益率'
                     )
-                    st.plotly_chart(fig4, use_container_width=True)
+                    st.plotly_chart(fig4, width='stretch')
             
             # 右侧信息区
             with info_col:
@@ -1003,4 +1086,4 @@ def show_backtest_results(selected_ba_rid=None):
 
 # 显示回测结果
 # 从session_state获取用户选择的回测记录ID，如果没有则显示最新的回测结果
-show_backtest_results(st.session_state.get('selected_ba_rid'))
+show_backtest_results(selected_ba_rid if 'selected_ba_rid' in globals() and selected_ba_rid else None)
