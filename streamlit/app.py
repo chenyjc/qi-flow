@@ -719,14 +719,32 @@ def show_backtest_results(selected_ba_rid=None):
                             if stock not in ['cash', 'now_account_value'] and isinstance(info, dict):
                                 # 获取股票名称
                                 stock_name = stock_names.get(stock, stock)
+                                
+                                # 计算盈利情况
+                                # 假设当前持仓信息中包含买入价格（avg_price）和当前价格（price）
+                                current_price = float(info.get('price', 0))
+                                avg_price = float(info.get('avg_price', 0))  # 平均买入价格
+                                amount = float(info.get('amount', 0))  # 持仓数量
+                                
+                                # 计算盈利金额和收益率
+                                if avg_price > 0:
+                                    profit = (current_price - avg_price) * amount
+                                    profit_rate = (current_price - avg_price) / avg_price * 100
+                                else:
+                                    profit = 0
+                                    profit_rate = 0
+                                
                                 stocks_data.append({
                                     '股票代码': stock,
                                     '股票名称': stock_name,
                                     '权重': float(info.get('weight', 0)),
                                     '持仓天数': int(info.get('count_day', 0)),
-                                    '持仓数量': float(info.get('amount', 0)),
-                                    '价格': float(info.get('price', 0)),
-                                    '持仓金额': float(info.get('amount', 0)) * float(info.get('price', 0))
+                                    '持仓数量': amount,
+                                    '成本价': avg_price,
+                                    '当前价': current_price,
+                                    '持仓金额': amount * current_price,
+                                    '盈利金额': profit,
+                                    '收益率': profit_rate
                                 })
                         
                     except Exception as e:
