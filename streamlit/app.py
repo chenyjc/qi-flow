@@ -133,8 +133,12 @@ with st.sidebar:
 
 # 初始化Qlib
 try:
-    qlib.init(provider_uri=provider_uri, region=REG_CN)
-    st.success(f"Qlib初始化成功，数据路径: {provider_uri}")
+    # 检查Qlib是否已初始化，避免重复初始化冲突
+    if not hasattr(qlib, '_initialized') or not qlib._initialized:
+        qlib.init(provider_uri=provider_uri, region=REG_CN)
+        st.success(f"Qlib初始化成功，数据路径: {provider_uri}")
+    else:
+        st.success(f"Qlib已初始化，数据路径: {provider_uri}")
 except Exception as e:
     st.error(f"Qlib初始化失败: {e}")
     st.stop()
@@ -145,19 +149,25 @@ with st.sidebar:
     with st.expander("训练相关", expanded=True):
         st.subheader("训练基础配置")
         # 训练专用的市场和基准
-        train_market = st.selectbox("训练市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"])
+        train_market = st.selectbox("训练市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=5)  # 默认选择csiall
         train_benchmark = st.selectbox("训练基准指数", ["SH000300", "SH000016", "SH000852", "SH000905"])
         
         st.subheader("训练时间范围")
+        # 动态计算日期范围
+        today = pd.Timestamp.now().normalize()
+        train_start = today - pd.DateOffset(years=3)  # 最近三年
+        valid_start = today - pd.DateOffset(years=1)  # 最近一年
+        test_start = today - pd.DateOffset(months=3)  # 最近三个月
+        
         # 训练专用的时间范围
-        train_start_date = st.date_input("训练开始日期", value=pd.to_datetime("2008-01-01"))
-        train_end_date = st.date_input("训练结束日期", value=pd.to_datetime("2023-12-31"))
-        valid_start_date = st.date_input("验证开始日期", value=pd.to_datetime("2024-01-01"))
-        valid_end_date = st.date_input("验证结束日期", value=pd.to_datetime("2024-12-31"))
+        train_start_date = st.date_input("训练开始日期", value=train_start)
+        train_end_date = st.date_input("训练结束日期", value=valid_start - pd.DateOffset(days=1))
+        valid_start_date = st.date_input("验证开始日期", value=valid_start)
+        valid_end_date = st.date_input("验证结束日期", value=test_start - pd.DateOffset(days=1))
         
         # 训练专用的测试集配置
-        test_start_date = st.date_input("测试集开始日期", value=pd.to_datetime("2025-01-01"))
-        test_end_date = st.date_input("测试集结束日期", value=pd.to_datetime("2025-12-15"))
+        test_start_date = st.date_input("测试集开始日期", value=test_start)
+        test_end_date = st.date_input("测试集结束日期", value=today)
         
         st.subheader("模型参数")
         # 训练专用的模型参数
@@ -277,12 +287,16 @@ with st.sidebar:
     with st.expander("回测相关", expanded=True):
         st.subheader("回测基础配置")
         # 回测专用的市场和基准
-        backtest_market = st.selectbox("回测市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=1)  # 默认改为csi300
+        backtest_market = st.selectbox("回测市场", ["all", "csi300", "csi500", "csi800", "csi1000", "csiall"], index=5)  # 默认选择csiall
         backtest_benchmark = st.selectbox("回测基准指数", ["SH000300", "SH000016", "SH000852", "SH000905"])
         
         st.subheader("回测日期配置")
-        backtest_start_date = st.date_input("回测开始日期", value=pd.to_datetime("2025-01-01"))
-        backtest_end_date = st.date_input("回测结束日期", value=pd.to_datetime("2025-12-15"))
+        # 动态计算回测日期范围
+        today = pd.Timestamp.now().normalize()
+        backtest_start = today - pd.DateOffset(months=3)  # 最近三个月
+        
+        backtest_start_date = st.date_input("回测开始日期", value=backtest_start)
+        backtest_end_date = st.date_input("回测结束日期", value=today)
         
         st.subheader("回测参数配置")
         initial_account = st.number_input("初始资金", min_value=100000, max_value=1000000000, value=500000, step=1000000)  # 最小值改为10万，默认值改为50万
