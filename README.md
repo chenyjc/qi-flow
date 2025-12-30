@@ -7,7 +7,7 @@ sdk: docker
 app_port: 8501
 tags:
 - streamlit
-pinned: true
+pinned: false
 short_description: Qlib 量化交易策略回测系统
 license: apache-2.0
 ---
