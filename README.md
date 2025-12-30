@@ -12,4 +12,4 @@ short_description: Qlib 量化交易策略回测系统
 license: apache-2.0
 ---
 
-# Welcome to Qlib 量化交易策略回测系统
+# Qlib 量化交易策略回测系统
