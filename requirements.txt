@@ -1,0 +1,7 @@
+pyqlib
+streamlit
+matplotlib
+mlflow
+plotly
+statsmodels
+tqdm
