@@ -8,7 +8,8 @@ app_port: 8501
 tags:
 - streamlit
 pinned: false
-short_description: Streamlit template space
+short_description: Qlib 量化交易策略回测系统
+license: apache-2.0
 ---
 
 # Welcome to Qlib 量化交易策略回测系统
