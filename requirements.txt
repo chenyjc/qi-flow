@@ -1,3 +1,8 @@
-altair
-pandas
+pyqlib
 streamlit
+matplotlib
+mlflow
+plotly
+statsmodels
+tqdm
+akshare
