@@ -29,7 +29,6 @@ plt.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
 
 # 添加登录功能
-st.title("登录")
 
 # 初始化session state用于管理登录状态
 if 'logged_in' not in st.session_state:
@@ -37,6 +36,7 @@ if 'logged_in' not in st.session_state:
 
 # 如果未登录，显示登录界面
 if not st.session_state.logged_in:
+    st.title("登录")
     password = st.text_input("请输入密码", type="password")
     if st.button("登录"):
         if password == "Mima!234":
