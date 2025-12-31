@@ -213,8 +213,8 @@ num_leaves = 210
 subsample = 0.8789
 colsample_bytree = 0.8879
 
-initial_account = 500000
-topk = 5
+initial_account = 1000000
+topk = 10
 n_drop = 1
 strategy_type = "TopkDropoutStrategy"
 
