@@ -39,7 +39,11 @@ from qlib.contrib.report import analysis_model, analysis_position
 from qlib.data import D
 
 # 导入股票数据库管理模块
-from stock_db import init_stock_db, update_stock_db, get_stock_names_from_db
+import sys
+import os
+# 确保项目根目录在Python路径中
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from main.stock_db import init_stock_db, update_stock_db, get_stock_names_from_db
 
 # 定义获取股票名称的函数
 def get_stock_names(stock_keys):
