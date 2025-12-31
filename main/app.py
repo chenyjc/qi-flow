@@ -729,9 +729,7 @@ try:
     # 设置MLflow跟踪URI为SQLite数据库
     sqlite_uri = "sqlite:///mlflow.db"
     R.set_uri(sqlite_uri)
-    workflow_msg = f"Qlib workflow已配置为使用SQLite后端: {sqlite_uri}"
-    if workflow_msg not in st.session_state.init_messages:
-        st.session_state.init_messages.append(workflow_msg)
+    # 不显示这条配置消息
 except Exception as e:
     st.error(f"Qlib初始化或配置失败: {e}")
     st.stop()
