@@ -92,11 +92,6 @@ st.set_page_config(layout="wide")
 
 # 配置MLflow使用SQLite后端替代文件系统存储
 import os
-# 设置MLflow跟踪URI为SQLite数据库
-os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
-# 直接导入并设置mlflow跟踪URI
-import mlflow
-mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
 # 初始化Qlib
 provider_uri = "~/.qlib/qlib_data/cn_data"
@@ -694,8 +689,15 @@ try:
         st.success(f"Qlib初始化成功，数据路径: {provider_uri}")
     else:
         st.success(f"Qlib已初始化，数据路径: {provider_uri}")
+    
+    # 配置Qlib workflow使用SQLite后端替代文件系统存储
+    from qlib.workflow import R
+    # 设置MLflow跟踪URI为SQLite数据库
+    sqlite_uri = "sqlite:///mlflow.db"
+    R.set_uri(sqlite_uri)
+    st.success(f"Qlib workflow已配置为使用SQLite后端: {sqlite_uri}")
 except Exception as e:
-    st.error(f"Qlib初始化失败: {e}")
+    st.error(f"Qlib初始化或配置失败: {e}")
     st.stop()
 
 # 主内容区
@@ -1228,6 +1230,8 @@ def show_backtest_results(selected_ba_rid=None):
                     # 方式2：直接从MLflow客户端获取（备用方案）
                     if not train_recorder_id:
                         import mlflow
+                        # 确保mlflow使用正确的SQLite后端
+                        mlflow.set_tracking_uri("sqlite:///mlflow.db")
                         mlflow_client = mlflow.tracking.MlflowClient()
                         run = mlflow_client.get_run(recorder.id)
                         if 'train_recorder_id' in run.data.params and run.data.params['train_recorder_id']:
