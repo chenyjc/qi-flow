@@ -28,6 +28,29 @@ import sys
 plt.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
 
+# 添加登录功能
+st.title("登录")
+
+# 初始化session state用于管理登录状态
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+# 如果未登录，显示登录界面
+if not st.session_state.logged_in:
+    password = st.text_input("请输入密码", type="password")
+    if st.button("登录"):
+        if password == "Mima!234":
+            st.session_state.logged_in = True
+            st.success("登录成功！")
+            # 刷新页面以显示主内容
+            st.rerun()
+        else:
+            st.error("密码错误，请重试。")
+    st.stop()
+else:
+    # 登录成功后显示主内容
+    st.title("Qlib 量化交易策略回测系统")
+
 # 导入Qlib相关模块
 import qlib
 from qlib.constant import REG_CN
@@ -100,8 +123,7 @@ import os
 # 初始化Qlib
 provider_uri = "~/.qlib/qlib_data/cn_data"
 
-# 应用标题
-st.title("Qlib 量化交易策略回测系统")
+# 应用标题已在登录成功后显示
 
 # 数据下载函数
 def download_data():
