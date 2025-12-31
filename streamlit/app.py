@@ -933,7 +933,7 @@ def show_backtest_results(selected_ba_rid=None):
                         height=400,
                         width=1000,
                         showlegend=True,
-                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
                         hovermode='x unified',
                         template='plotly_white',
                         yaxis_title='累计收益率'
@@ -976,7 +976,7 @@ def show_backtest_results(selected_ba_rid=None):
                         height=400,
                         width=1000,
                         showlegend=True,
-                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
                         hovermode='x unified',
                         template='plotly_white',
                         yaxis_title='日收益率'
@@ -1009,7 +1009,7 @@ def show_backtest_results(selected_ba_rid=None):
                         height=400,
                         width=1000,
                         showlegend=True,
-                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
                         hovermode='x unified',
                         template='plotly_white',
                         yaxis_title='超额收益率'
@@ -1042,7 +1042,7 @@ def show_backtest_results(selected_ba_rid=None):
                         height=400,
                         width=1000,
                         showlegend=True,
-                        legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='right', x=1),
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
                         hovermode='x unified',
                         template='plotly_white',
                         yaxis_title='累计超额收益率'
