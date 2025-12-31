@@ -17,7 +17,7 @@ rm -f qlib_bin.tar.gz
 The official dataset below will resume in short future.
 """
 
-import main as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
