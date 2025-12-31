@@ -1,0 +1,10 @@
+pyqlib
+streamlit
+matplotlib
+mlflow
+plotly
+statsmodels
+tqdm
+akshare
+pandas
+numpy
