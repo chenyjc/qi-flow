@@ -685,24 +685,38 @@ with st.sidebar:
 # 初始化股票信息数据库
 init_stock_db()
 
+# 初始化Session State来保存消息状态
+if 'init_messages' not in st.session_state:
+    st.session_state.init_messages = []
+
 # 初始化Qlib
 try:
     # 检查Qlib是否已初始化，避免重复初始化冲突
     if not hasattr(qlib, '_initialized') or not qlib._initialized:
         qlib.init(provider_uri=provider_uri, region=REG_CN)
-        st.success(f"Qlib初始化成功，数据路径: {provider_uri}")
+        init_msg = f"Qlib初始化成功，数据路径: {provider_uri}"
+        if init_msg not in st.session_state.init_messages:
+            st.session_state.init_messages.append(init_msg)
     else:
-        st.success(f"Qlib已初始化，数据路径: {provider_uri}")
+        init_msg = f"Qlib已初始化，数据路径: {provider_uri}"
+        if init_msg not in st.session_state.init_messages:
+            st.session_state.init_messages.append(init_msg)
     
     # 配置Qlib workflow使用SQLite后端替代文件系统存储
     from qlib.workflow import R
     # 设置MLflow跟踪URI为SQLite数据库
     sqlite_uri = "sqlite:///mlflow.db"
     R.set_uri(sqlite_uri)
-    st.success(f"Qlib workflow已配置为使用SQLite后端: {sqlite_uri}")
+    workflow_msg = f"Qlib workflow已配置为使用SQLite后端: {sqlite_uri}"
+    if workflow_msg not in st.session_state.init_messages:
+        st.session_state.init_messages.append(workflow_msg)
 except Exception as e:
     st.error(f"Qlib初始化或配置失败: {e}")
     st.stop()
+
+# 显示所有初始化消息
+for msg in st.session_state.init_messages:
+    st.success(msg)
 
 # 主内容区
 # 数据预览功能
