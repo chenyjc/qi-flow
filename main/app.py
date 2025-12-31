@@ -729,9 +729,7 @@ except Exception as e:
     st.error(f"Qlib初始化或配置失败: {e}")
     st.stop()
 
-# 显示所有初始化消息
-for msg in st.session_state.init_messages:
-    st.success(msg)
+
 
 # 主内容区
 # 数据预览功能
