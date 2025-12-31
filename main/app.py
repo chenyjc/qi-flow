@@ -90,6 +90,14 @@ def get_stock_names(stock_keys):
 # 设置页面为宽屏模式
 st.set_page_config(layout="wide")
 
+# 配置MLflow使用SQLite后端替代文件系统存储
+import os
+# 设置MLflow跟踪URI为SQLite数据库
+os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
+# 直接导入并设置mlflow跟踪URI
+import mlflow
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
+
 # 初始化Qlib
 provider_uri = "~/.qlib/qlib_data/cn_data"
 
