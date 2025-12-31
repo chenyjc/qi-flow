@@ -716,13 +716,8 @@ try:
     # 检查Qlib是否已初始化，避免重复初始化冲突
     if not hasattr(qlib, '_initialized') or not qlib._initialized:
         qlib.init(provider_uri=provider_uri, region=REG_CN)
-        init_msg = f"Qlib初始化成功，数据路径: {provider_uri}"
-        if init_msg not in st.session_state.init_messages:
-            st.session_state.init_messages.append(init_msg)
     else:
-        init_msg = f"Qlib已初始化，数据路径: {provider_uri}"
-        if init_msg not in st.session_state.init_messages:
-            st.session_state.init_messages.append(init_msg)
+        pass  # Qlib已初始化，无需显示消息
     
     # 配置Qlib workflow使用SQLite后端替代文件系统存储
     from qlib.workflow import R
