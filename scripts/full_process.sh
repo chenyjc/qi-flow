@@ -6,14 +6,18 @@ echo "开始执行完整流程: $(date)"
 
 # 1. 下载最新数据
 echo "1. 开始下载最新数据..."
-/app/scripts/update_data.sh
+python -c "
+import sys
+
+from main.app import download_data
+download_data()
+"
 
 # 2. 执行训练模型
 echo "2. 开始训练模型..."
 python -c "
 import sys
-sys.path.append('/app')
-from streamlit.app import train_model
+from main.app import train_model
 train_model()
 "
 
@@ -21,8 +25,7 @@ train_model()
 echo "3. 开始回测模型..."
 python -c "
 import sys
-sys.path.append('/app')
-from streamlit.app import backtest_model
+from main.app import backtest_model
 backtest_model()
 "
 

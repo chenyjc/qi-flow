@@ -19,4 +19,4 @@ service cron start
 /app/scripts/full_process.sh
 
 # 启动Streamlit应用
-streamlit run streamlit/app.py
+streamlit run main/app.py
