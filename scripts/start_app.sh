@@ -15,8 +15,12 @@ chmod +x /app/scripts/full_process.sh
 # 启动cron服务
 service cron start
 
-# 执行完整流程脚本（首次启动时执行一次）
-/app/scripts/full_process.sh
+# 容器启动时只下载数据，不执行训练和回测
+echo "容器启动：只执行数据下载..."
+python -c "
+from main.app import download_data
+download_data()
+"
 
 # 启动Streamlit应用
 streamlit run main/app.py
