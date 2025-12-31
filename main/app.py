@@ -39,11 +39,6 @@ from qlib.contrib.report import analysis_model, analysis_position
 from qlib.data import D
 
 # 导入股票数据库管理模块
-import os
-import sys
-
-# 添加当前目录到Python路径，解决容器中的模块找不到问题
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from stock_db import init_stock_db, update_stock_db, get_stock_names_from_db
 
 # 定义获取股票名称的函数
