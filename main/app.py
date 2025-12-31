@@ -38,6 +38,55 @@ from qlib.utils import flatten_dict
 from qlib.contrib.report import analysis_model, analysis_position
 from qlib.data import D
 
+# 导入股票数据库管理模块
+from stock_db import init_stock_db, update_stock_db, get_stock_names_from_db
+
+# 定义获取股票名称的函数
+def get_stock_names(stock_keys):
+    """获取股票代码到名称的映射"""
+    stock_names = {}
+    
+    # 1. 首先尝试从数据库获取
+    stock_names, db_success, db_error = get_stock_names_from_db(stock_keys)
+    
+    if db_success and stock_names:
+        return stock_names, True, None, None
+    
+    # 2. 如果数据库获取失败或没有数据，尝试从akshare获取
+    try:
+        import akshare as ak
+        # 尝试获取股票名称数据
+        stock_info_df = ak.stock_info_a_code_name()
+        
+        # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
+        for _, row in stock_info_df.iterrows():
+            code = row['code']
+            name = row['name']
+            # 保存不带前缀的代码映射
+            stock_names[code] = name
+            # 保存带SH前缀的代码映射
+            stock_names[f"SH{code}"] = name
+            # 保存带SZ前缀的代码映射
+            stock_names[f"SZ{code}"] = name
+        
+        # 更新数据库
+        update_stock_db()
+        
+        return stock_names, True, None
+    except Exception as e:
+        # 3. 如果所有方法都失败，使用股票代码作为名称
+        for stock in stock_keys:
+            stock_names[stock] = stock
+            # 为不同格式的代码创建映射
+            if stock.startswith('SH') or stock.startswith('SZ'):
+                # 同时添加不带前缀的映射
+                stock_names[stock[2:]] = stock[2:]
+            else:
+                # 同时添加带前缀的映射
+                stock_names[f"SH{stock}"] = stock
+                stock_names[f"SZ{stock}"] = stock
+        return stock_names, False, e
+
 # 设置页面为宽屏模式
 st.set_page_config(layout="wide")
 
@@ -405,6 +454,10 @@ with st.sidebar:
         with col2:
             preview_data = st.button("预览数据")
         
+        # 添加更新股票信息数据库按钮
+        st.markdown("---")
+        update_stock_btn = st.button("更新股票信息数据库")
+        
         # 全部执行按钮
         st.markdown("---")
         all_in_one_btn = st.button("全部执行")
@@ -412,6 +465,14 @@ with st.sidebar:
         # 如果点击了下载数据按钮
         if download_btn:
             download_data()
+        
+        # 如果点击了更新股票信息数据库按钮
+        if update_stock_btn:
+            with st.spinner("正在更新股票信息数据库..."):
+                if update_stock_db():
+                    st.success("股票信息数据库更新成功！")
+                else:
+                    st.error("股票信息数据库更新失败，请稍后重试。")
         
         # 如果点击了全部执行按钮
         if all_in_one_btn:
@@ -614,6 +675,9 @@ with st.sidebar:
     - 建议先使用小数据量进行测试
     """)
 
+# 初始化股票信息数据库
+init_stock_db()
+
 # 初始化Qlib
 try:
     # 检查Qlib是否已初始化，避免重复初始化冲突
@@ -693,6 +757,109 @@ if 'preview_data' in locals() and preview_data:
 
 # 回测结果部分
 st.header("回测结果")
+
+# 导入必要的库
+import sqlite3
+import os
+import datetime
+
+# 定义数据库文件路径
+DB_FILE = os.path.join(os.path.dirname(__file__), 'stock_info.db')
+
+# 初始化股票信息数据库
+def init_stock_db():
+    """初始化股票信息数据库"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # 创建股票信息表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS stock_info (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# 更新股票信息数据库
+def update_stock_db():
+    """更新股票信息数据库，从akshare获取最新数据"""
+    try:
+        import akshare as ak
+        # 获取A股所有股票信息
+        stock_info_df = ak.stock_info_a_code_name()
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # 获取当前时间
+        updated_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 清空旧数据并插入新数据
+        cursor.execute('DELETE FROM stock_info')
+        
+        # 插入新数据
+        for _, row in stock_info_df.iterrows():
+            code = row['code']
+            name = row['name']
+            cursor.execute('INSERT INTO stock_info (code, name, updated_at) VALUES (?, ?, ?)', 
+                          (code, name, updated_at))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"更新股票数据库失败: {e}")
+        return False
+
+# 定义获取股票名称的函数
+def get_stock_names(stock_keys):
+    """获取股票代码到名称的映射"""
+    stock_names = {}
+    
+    # 1. 首先尝试从数据库获取
+    stock_names, db_success, db_error = get_stock_names_from_db(stock_keys)
+    
+    if db_success and stock_names:
+        return stock_names, True, None
+    
+    # 2. 如果数据库获取失败或没有数据，尝试从akshare获取
+    try:
+        import akshare as ak
+        # 尝试获取股票名称数据
+        stock_info_df = ak.stock_info_a_code_name()
+        
+        # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
+        for _, row in stock_info_df.iterrows():
+            code = row['code']
+            name = row['name']
+            # 保存不带前缀的代码映射
+            stock_names[code] = name
+            # 保存带SH前缀的代码映射
+            stock_names[f"SH{code}"] = name
+            # 保存带SZ前缀的代码映射
+            stock_names[f"SZ{code}"] = name
+        
+        # 更新数据库
+        update_stock_db()
+        
+        return stock_names, True, None
+    except Exception as e:
+        # 3. 如果所有方法都失败，使用股票代码作为名称
+        for stock in stock_keys:
+            stock_names[stock] = stock
+            # 为不同格式的代码创建映射
+            if stock.startswith('SH') or stock.startswith('SZ'):
+                # 同时添加不带前缀的映射
+                stock_names[stock[2:]] = stock[2:]
+            else:
+                # 同时添加带前缀的映射
+                stock_names[f"SH{stock}"] = stock
+                stock_names[f"SZ{stock}"] = stock
+        return stock_names, False, e
 
 # 定义回测结果展示函数
 def show_backtest_results(selected_ba_rid=None):
@@ -796,41 +963,28 @@ def show_backtest_results(selected_ba_rid=None):
                             pos_dict = {}
                         
                         # 提取股票数据
-                        stock_names = {}
-                        
-                        # 获取所有A股基本信息
-                        try:
-                            import akshare as ak
-                            # 尝试获取股票名称数据，添加超时和异常处理
-                            stock_info_df = ak.stock_info_a_code_name()
-                            # 创建股票代码到名称的映射，支持带前缀和不带前缀的代码
-                            for _, row in stock_info_df.iterrows():
-                                code = row['code']
-                                name = row['name']
-                                # 保存不带前缀的代码映射
-                                stock_names[code] = name
-                                # 保存带SH前缀的代码映射
-                                stock_names[f"SH{code}"] = name
-                                # 保存带SZ前缀的代码映射
-                                stock_names[f"SZ{code}"] = name
-                        except Exception as e:
-                            st.warning(f"获取股票名称失败，将使用股票代码作为名称: {e}")
-                            # 创建简单的映射：使用股票代码作为名称
-                            stock_keys = [stock for stock in pos_dict.keys() if stock not in ['cash', 'now_account_value']]
-                            for stock in stock_keys:
-                                stock_names[stock] = stock
-                                # 为不同格式的代码创建映射
-                                if stock.startswith('SH') or stock.startswith('SZ'):
-                                    # 同时添加不带前缀的映射
-                                    stock_names[stock[2:]] = stock[2:]
-                                else:
-                                    # 同时添加带前缀的映射
-                                    stock_names[f"SH{stock}"] = stock
-                                    stock_names[f"SZ{stock}"] = stock
-                        
-                        # 遍历持仓数据
                         stock_keys = [stock for stock in pos_dict.keys() if stock not in ['cash', 'now_account_value']]
                         
+                        # 使用Session State来跟踪重试状态
+                        if 'retry_get_stock_names' not in st.session_state:
+                            st.session_state.retry_get_stock_names = False
+                        
+                        # 初始获取股票名称或重试获取
+                        if st.session_state.retry_get_stock_names:
+                            stock_names, success, error = get_stock_names(stock_keys)
+                            st.session_state.retry_get_stock_names = False
+                        else:
+                            stock_names, success, error = get_stock_names(stock_keys)
+                        
+                        # 显示获取结果
+                        if not success:
+                            st.warning(f"获取股票名称失败，将使用股票代码作为名称: {error}")
+                            # 添加重试按钮
+                            if st.button("重试获取股票名称"):
+                                st.session_state.retry_get_stock_names = True
+                                st.rerun()
+                        
+                        # 遍历持仓数据
                         for stock in stock_keys:
                             info = pos_dict[stock]
                             

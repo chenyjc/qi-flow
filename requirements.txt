@@ -6,3 +6,5 @@ plotly
 statsmodels
 tqdm
 akshare
+pandas
+numpy
