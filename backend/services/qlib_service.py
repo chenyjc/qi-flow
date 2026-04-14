@@ -736,26 +736,32 @@ class QlibService:
                             profit_rate = 0.0
 
                             try:
-                                if count_day > 0:
-                                    # 计算开仓日期
-                                    open_date = date - pd.DateOffset(days=count_day)
-                                    start_date = open_date - pd.DateOffset(days=2)
-                                    end_date = open_date + pd.DateOffset(days=2)
+                                # 计算开仓日期
+                                open_date = date - pd.DateOffset(days=count_day)
+                                start_date = open_date - pd.DateOffset(days=2)
+                                end_date = open_date + pd.DateOffset(days=2)
 
-                                    price_data = D.features(
-                                        instruments=[stock],
-                                        fields=['$close'],
-                                        start_time=start_date.strftime('%Y-%m-%d'),
-                                        end_time=end_date.strftime('%Y-%m-%d')
-                                    )
+                                print(f"[DEBUG] Stock {stock}, date={date}, count_day={count_day}, open_date={open_date}")
 
-                                    if not price_data.empty:
-                                        # 查找最接近开仓日期的价格
-                                        date_diffs = abs(price_data.index.get_level_values('datetime') - open_date)
-                                        min_diff_idx = date_diffs.argmin()
-                                        avg_price = float(price_data.iloc[min_diff_idx]['$close'])
-                            except Exception:
-                                pass
+                                price_data = D.features(
+                                    instruments=[stock],
+                                    fields=['$close'],
+                                    start_time=start_date.strftime('%Y-%m-%d'),
+                                    end_time=end_date.strftime('%Y-%m-%d')
+                                )
+
+                                print(f"[DEBUG] price_data empty={price_data.empty}, shape={price_data.shape if not price_data.empty else 0}")
+
+                                if not price_data.empty:
+                                    # 查找最接近开仓日期的价格
+                                    date_diffs = abs(price_data.index.get_level_values('datetime') - open_date)
+                                    min_diff_idx = date_diffs.argmin()
+                                    avg_price = float(price_data.iloc[min_diff_idx]['$close'])
+                                    print(f"[DEBUG] Found avg_price={avg_price}, current_price={current_price}")
+                                else:
+                                    print(f"[DEBUG] No price data found for {stock} around {open_date}")
+                            except Exception as e:
+                                print(f"[DEBUG] Error getting price for {stock}: {e}")
 
                             # 计算盈利金额和收益率 - 与最终持仓相同的公式
                             if avg_price > 0 and current_price > 0:
@@ -773,19 +779,6 @@ class QlibService:
                                 'hold_value': amount * current_price,
                                 'profit': round(profit, 2),
                                 'profit_rate': round(profit_rate, 2)
-                            })
-
-                            date_positions.append({
-                                'stock_code': stock,
-                                'stock_name': stock_name,
-                                'weight': float(info.get('weight', 0)),
-                                'hold_days': count_day,
-                                'amount': amount,
-                                'cost_price': avg_price,
-                                'current_price': current_price,
-                                'hold_value': amount * current_price,
-                                'profit': profit,
-                                'profit_rate': profit_rate
                             })
                     all_positions_data[date.strftime('%Y-%m-%d')] = date_positions
                     print(f"Date {date.strftime('%Y-%m-%d')}: {len(date_positions)} positions")
