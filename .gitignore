@@ -209,3 +209,22 @@ __marimo__/
 # MLflow
 mlruns/
 mlflow.db
+
+# QiFlow specific
+.claude/
+frontend/dist/
+frontend/node_modules/
+backend/mlruns/
+backend/mlflow.db
+*.db
+*.pkl
+.ipynb_checkpoints/
+
+# PowerShell scripts
+*.ps1
+
+# Qlib data directory
+.qlib/
+
+# Streamlit cache
+.stlit/

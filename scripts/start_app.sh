@@ -16,7 +16,7 @@ chmod +x /app/scripts/full_process.sh
 service cron start
 
 # 容器启动时只下载数据，不执行训练和回测
-echo "容器启动：只执行数据下载..."
+echo "执行数据下载..."
 # 给数据更新脚本添加执行权限
 chmod +x /app/scripts/update_data.sh
 # 执行数据更新脚本

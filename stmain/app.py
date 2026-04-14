@@ -24,6 +24,9 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
 
+# 设置页面为宽屏模式 - 必须是第一个Streamlit命令
+st.set_page_config(layout="wide", page_title="Qlib 量化交易策略回测系统")
+
 # 设置中文字体
 plt.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
@@ -66,7 +69,7 @@ import sys
 import os
 # 确保项目根目录在Python路径中
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from main.stock_db import init_stock_db, update_stock_db, get_stock_names_from_db
+from stmain.stock_db import init_stock_db, update_stock_db, get_stock_names_from_db
 
 # 定义获取股票名称的函数
 def get_stock_names(stock_keys):
@@ -113,9 +116,6 @@ def get_stock_names(stock_keys):
                 stock_names[f"SH{stock}"] = stock
                 stock_names[f"SZ{stock}"] = stock
         return stock_names, False, e
-
-# 设置页面为宽屏模式
-st.set_page_config(layout="wide")
 
 # 配置MLflow使用SQLite后端替代文件系统存储
 import os
