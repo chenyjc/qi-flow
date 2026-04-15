@@ -107,6 +107,7 @@
 <script setup>
 import { ref } from 'vue'
 import axios from 'axios'
+import { ElMessageBox } from 'element-plus'
 
 const API = '/api'
 
@@ -162,45 +163,70 @@ const previewData = async () => {
 
 const downloadData = async () => {
   downloading.value = true
+  message.value = ''
+  
+  try {
+    const checkRes = await axios.get(`${API}/qlib/check_data_release`)
+    if (checkRes.data.success) {
+      const releaseDate = checkRes.data.release_date
+      try {
+        await ElMessageBox.confirm(
+          `数据发布日期: ${releaseDate}\n\n确认下载最新数据？`,
+          '数据下载确认',
+          {
+            confirmButtonText: '确认下载',
+            cancelButtonText: '取消',
+            type: 'info'
+          }
+        )
+        startDownload()
+      } catch {
+        downloading.value = false
+      }
+    } else {
+      message.value = checkRes.data.message
+      messageType.value = 'error'
+      downloading.value = false
+    }
+  } catch (e) {
+    message.value = `检查发布日期失败: ${e.message}`
+    messageType.value = 'error'
+    downloading.value = false
+  }
+}
+
+const startDownload = () => {
   showProgress.value = true
   progress.value = 0
   progressMessage.value = '正在启动下载...'
-  message.value = ''
-
-  try {
-    const es = new EventSource(`${API}/qlib/download_data_stream`)
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data)
-      if (data.progress >= 0) {
-        progress.value = data.progress
-        progressMessage.value = data.message
-      }
-      if (data.progress === 100) {
-        es.close()
-        downloading.value = false
-        showProgress.value = false
-        message.value = data.message
-        messageType.value = 'success'
-      }
-      if (data.progress === -1) {
-        es.close()
-        downloading.value = false
-        showProgress.value = false
-        message.value = data.message
-        messageType.value = 'error'
-      }
+  
+  const es = new EventSource(`${API}/qlib/download_data_stream`)
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data)
+    if (data.progress >= 0) {
+      progress.value = data.progress
+      progressMessage.value = data.message
     }
-    es.onerror = () => {
+    if (data.progress === 100) {
       es.close()
       downloading.value = false
       showProgress.value = false
-      message.value = '连接失败，请重试'
+      message.value = data.message
+      messageType.value = 'success'
+    }
+    if (data.progress === -1) {
+      es.close()
+      downloading.value = false
+      showProgress.value = false
+      message.value = data.message
       messageType.value = 'error'
     }
-  } catch (e) {
+  }
+  es.onerror = () => {
+    es.close()
     downloading.value = false
     showProgress.value = false
-    message.value = `下载失败: ${e.message}`
+    message.value = '连接失败，请重试'
     messageType.value = 'error'
   }
 }

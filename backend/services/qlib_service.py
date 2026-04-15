@@ -186,13 +186,36 @@ class QlibService:
                     stock_names[f"SZ{stock}"] = stock
             return stock_names, False, e
     
+    def check_data_release(self):
+        """检查 Qlib 数据发布日期"""
+        try:
+            import json
+            api_url = "https://api.github.com/repos/chenditc/investment_data/releases/latest"
+            
+            req = urllib.request.Request(api_url)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                release_info = json.loads(response.read().decode('utf-8'))
+                release_date = release_info.get('published_at', '')
+                if release_date:
+                    release_date = release_date.split('T')[0]
+                return {
+                    "success": True,
+                    "release_date": release_date,
+                    "message": f"数据发布日期: {release_date}"
+                }
+        except Exception as e:
+            print(f"获取发布日期失败: {e}")
+            return {"success": False, "message": f"获取发布日期失败: {str(e)}"}
+    
     def download_data_with_progress(self, progress_callback=None):
         """下载Qlib数据（Python实现，带进度回调）"""
         try:
             import shutil
             import tarfile
+            import json
             
             url = "https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz"
+            api_url = "https://api.github.com/repos/chenditc/investment_data/releases/latest"
             target_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data")
             backup_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data_backup")
             temp_file = os.path.join(os.path.expanduser("~/.qlib"), "qlib_bin.tar.gz")
@@ -202,7 +225,23 @@ class QlibService:
                 if progress_callback:
                     progress_callback(progress, message)
             
-            report_progress(0, "开始下载Qlib数据...")
+            report_progress(0, "检查数据发布日期...")
+            
+            # 获取最新 release 信息
+            release_date = None
+            try:
+                req = urllib.request.Request(api_url)
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    release_info = json.loads(response.read().decode('utf-8'))
+                    release_date = release_info.get('published_at', '')
+                    if release_date:
+                        release_date = release_date.split('T')[0]
+                        report_progress(5, f"数据发布日期: {release_date}")
+            except Exception as e:
+                print(f"获取发布日期失败: {e}")
+                report_progress(5, "无法获取发布日期")
+            
+            report_progress(10, "开始下载Qlib数据...")
             
             os.makedirs(os.path.dirname(temp_file), exist_ok=True)
             
@@ -212,9 +251,9 @@ class QlibService:
                 file_size = int(response.headers.get('Content-Length', 0))
             
             if file_size > 0:
-                report_progress(5, f"文件大小: {file_size / 1024 / 1024:.2f} MB")
+                report_progress(15, f"文件大小: {file_size / 1024 / 1024:.2f} MB")
             
-            report_progress(10, "开始下载...")
+            report_progress(20, "开始下载...")
             
             # 下载文件
             downloaded = 0
@@ -228,7 +267,7 @@ class QlibService:
                             break
                         f.write(data)
                         downloaded += len(data)
-                        progress = int(10 + downloaded / file_size * 70)
+                        progress = int(20 + downloaded / file_size * 60)
                         report_progress(progress, f"下载中 {downloaded/1024/1024:.1f}MB / {file_size/1024/1024:.1f}MB")
             
             report_progress(80, "下载完成")
@@ -261,7 +300,7 @@ class QlibService:
             report_progress(100, "数据下载完成")
             
             self.init_qlib(force=True)
-            return {"success": True, "message": "Qlib数据已更新完成！"}
+            return {"success": True, "message": "Qlib数据已更新完成！", "release_date": release_date}
             
         except Exception as e:
             print(f"数据下载失败: {str(e)}")

@@ -35,6 +35,11 @@ class BacktestRequest(BaseModel):
     n_drop: int = 1
     strategy_type: str = "TopkDropoutStrategy"
 
+@router.get("/check_data_release")
+async def check_data_release():
+    """检查 Qlib 数据发布日期"""
+    return qlib_service.check_data_release()
+
 @router.get("/download_data_stream")
 async def download_qlib_data_stream():
     """下载 Qlib 数据（SSE流式返回进度）"""
