@@ -29,21 +29,20 @@ class QlibService:
         self.init_qlib()
         self.init_stock_db()
     
-    def init_qlib(self):
+    def init_qlib(self, force=False):
         """初始化Qlib"""
         try:
-            # 检查Qlib是否已初始化
+            if force:
+                qlib._initialized = False
+            
             if not hasattr(qlib, '_initialized') or not qlib._initialized:
                 qlib.init(provider_uri=self.provider_uri, region=REG_CN)
             
-            # 配置Qlib workflow使用SQLite后端
             sqlite_uri = "sqlite:///mlflow.db"
             R.set_uri(sqlite_uri)
         except Exception as e:
             print(f"Qlib初始化失败: {e}")
-            # 尝试使用绝对路径
             try:
-                import os
                 provider_uri = os.path.expanduser("~/.qlib/qlib_data/cn_data")
                 qlib.init(provider_uri=provider_uri, region=REG_CN)
                 print(f"使用绝对路径初始化Qlib成功: {provider_uri}")
@@ -188,194 +187,85 @@ class QlibService:
             return stock_names, False, e
     
     def download_data_with_progress(self, progress_callback=None):
-        """下载Qlib数据（备份旧数据后替换，多线程加速，带进度回调）"""
+        """下载Qlib数据（Python实现，带进度回调）"""
         try:
             import shutil
-            import concurrent.futures
-            import threading
+            import tarfile
             
-            # 数据URL
             url = "https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz"
-            
-            # 目标目录
             target_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data")
-            
-            # 备份目录
             backup_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data_backup")
-            
-            # 临时文件路径（使用绝对路径）
             temp_file = os.path.join(os.path.expanduser("~/.qlib"), "qlib_bin.tar.gz")
             
-            # 创建临时目录
-            os.makedirs(os.path.dirname(temp_file), exist_ok=True)
-            
-            # 进度锁和状态
-            progress_lock = threading.Lock()
-            downloaded_bytes = [0]
-            last_reported_progress = [0]
-            
             def report_progress(progress, message):
+                print(f"[下载进度] {progress}%: {message}")
                 if progress_callback:
-                    # 避免重复报告相同进度
-                    with progress_lock:
-                        if progress > last_reported_progress[0] or progress == 100:
-                            last_reported_progress[0] = progress
-                            progress_callback(progress, message)
-            
-            # 多线程下载函数（分块读取以实时报告进度）
-            def download_chunk(url, start, end, temp_file_part, chunk_index):
-                headers = {'Range': f'bytes={start}-{end}'}
-                req = urllib.request.Request(url, headers=headers)
-                chunk_size = 1024 * 1024  # 1MB per read
-                
-                with urllib.request.urlopen(req, timeout=300) as response:
-                    with open(temp_file_part, 'wb') as f:
-                        while True:
-                            data = response.read(chunk_size)
-                            if not data:
-                                break
-                            f.write(data)
-                            with progress_lock:
-                                downloaded_bytes[0] += len(data)
-                                progress = int(downloaded_bytes[0] / file_size * 80)
-                                # 每5%报告一次进度
-                                if progress >= last_reported_progress[0] + 5 or progress >= 80:
-                                    report_progress(progress, f"下载中 {downloaded_bytes[0]/1024/1024:.1f}MB / {file_size/1024/1024:.1f}MB")
+                    progress_callback(progress, message)
             
             report_progress(0, "开始下载Qlib数据...")
+            
+            os.makedirs(os.path.dirname(temp_file), exist_ok=True)
             
             # 获取文件大小
             req = urllib.request.Request(url, method='HEAD')
             with urllib.request.urlopen(req, timeout=30) as response:
                 file_size = int(response.headers.get('Content-Length', 0))
             
-            downloaded = False
             if file_size > 0:
                 report_progress(5, f"文件大小: {file_size / 1024 / 1024:.2f} MB")
-                
-                try:
-                    # 使用多线程下载（8线程）
-                    num_threads = 8
-                    chunk_size = file_size // num_threads
-                    
-                    report_progress(10, f"使用 {num_threads} 线程并行下载...")
-                    
-                    # 创建临时文件片段
-                    temp_parts = []
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-                        futures = []
-                        for i in range(num_threads):
-                            start = i * chunk_size
-                            end = start + chunk_size - 1 if i < num_threads - 1 else file_size - 1
-                            temp_part = temp_file + f'.part{i}'
-                            temp_parts.append(temp_part)
-                            futures.append(executor.submit(download_chunk, url, start, end, temp_part, i))
-                        
-                        # 等待所有下载完成
-                        concurrent.futures.wait(futures)
-                    
-                    # 合并文件片段
-                    report_progress(80, "合并下载片段...")
-                    with open(temp_file, 'wb') as outfile:
-                        for i, temp_part in enumerate(temp_parts):
-                            with open(temp_part, 'rb') as infile:
-                                outfile.write(infile.read())
-                            os.remove(temp_part)
-                            report_progress(80 + int((i + 1) / len(temp_parts) * 5), f"合并片段 {i+1}/{len(temp_parts)}")
-                    
-                    downloaded = True
-                    report_progress(85, "下载完成")
-                except Exception as e:
-                    print(f"多线程下载失败: {str(e)}")
-                    # 清理临时文件片段
-                    for temp_part in temp_parts:
-                        if os.path.exists(temp_part):
-                            os.remove(temp_part)
             
-            # 如果多线程下载失败，使用单线程下载
-            if not downloaded:
-                report_progress(20, "使用单线程下载...")
-                
-                def single_thread_progress(count, block_size, total_size):
-                    downloaded = count * block_size
-                    progress = int(downloaded / total_size * 80)
-                    report_progress(progress, f"下载中 {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB")
-                
-                urllib.request.urlretrieve(url, temp_file, reporthook=single_thread_progress)
-                report_progress(85, "下载完成")
+            report_progress(10, "开始下载...")
             
-            # 释放Qlib对数据目录的占用
-            report_progress(88, "释放资源...")
-            self.release_qlib()
+            # 下载文件
+            downloaded = 0
+            chunk_size = 1024 * 1024
             
-            # 强制垃圾回收释放资源
-            import gc
-            gc.collect()
+            with urllib.request.urlopen(url, timeout=300) as response:
+                with open(temp_file, 'wb') as f:
+                    while True:
+                        data = response.read(chunk_size)
+                        if not data:
+                            break
+                        f.write(data)
+                        downloaded += len(data)
+                        progress = int(10 + downloaded / file_size * 70)
+                        report_progress(progress, f"下载中 {downloaded/1024/1024:.1f}MB / {file_size/1024/1024:.1f}MB")
             
-            report_progress(90, "开始备份旧数据...")
+            report_progress(80, "下载完成")
             
-            # 删除上次的备份（如果存在）
-            if os.path.exists(backup_dir):
-                shutil.rmtree(backup_dir)
-            
-            # 备份当前数据（如果存在）- 使用复制后删除的方式
+            # 备份旧数据
             if os.path.exists(target_dir):
-                report_progress(91, "复制旧数据到备份目录...")
-                shutil.copytree(target_dir, backup_dir)
-                report_progress(92, "删除旧数据目录...")
-                # 尝试多次删除，因为可能有文件锁定
-                for attempt in range(3):
-                    try:
-                        shutil.rmtree(target_dir)
-                        break
-                    except Exception as e:
-                        if attempt < 2:
-                            gc.collect()
-                            import time
-                            time.sleep(1)
-                        else:
-                            raise e
+                report_progress(85, "备份旧数据...")
+                if os.path.exists(backup_dir):
+                    shutil.rmtree(backup_dir)
+                shutil.move(target_dir, backup_dir)
             
-            report_progress(93, "开始解压新数据...")
-            
-            # 创建目标目录
-            os.makedirs(target_dir, exist_ok=True)
+            report_progress(88, "开始解压...")
             
             # 解压文件
+            os.makedirs(target_dir, exist_ok=True)
             with tarfile.open(temp_file, "r:gz") as tar:
                 members = tar.getmembers()
-                total_members = len(members)
-                # 过滤出需要解压的文件
                 valid_members = [m for m in members if '/' in m.name]
-                
+                total = len(valid_members)
                 for i, member in enumerate(valid_members):
                     member.name = member.name.split('/', 1)[1]
                     tar.extract(member, target_dir)
-                    # 每10个文件报告一次进度
-                    if i % 10 == 0 or i == len(valid_members) - 1:
-                        progress = 93 + int((i + 1) / len(valid_members) * 5)
-                        report_progress(progress, f"解压中 {i+1}/{len(valid_members)} 文件")
+                    if i % 100 == 0 or i == total - 1:
+                        progress = int(88 + (i + 1) / total * 10)
+                        report_progress(progress, f"解压中 {i+1}/{total}")
             
             # 删除临时文件
             os.remove(temp_file)
             
-            report_progress(98, "重新初始化Qlib...")
+            report_progress(100, "数据下载完成")
             
-            # 重新初始化Qlib
-            self.init_qlib()
+            self.init_qlib(force=True)
+            return {"success": True, "message": "Qlib数据已更新完成！"}
             
-            report_progress(100, "完成")
-            
-            return {"success": True, "message": "Qlib数据已更新完成！旧数据已备份。"}
         except Exception as e:
-            print(f"数据加载失败: {str(e)}")
-            # 如果更新失败，尝试恢复备份
-            try:
-                if os.path.exists(backup_dir) and not os.path.exists(target_dir):
-                    shutil.move(backup_dir, target_dir)
-            except Exception as restore_error:
-                print(f"恢复备份失败: {restore_error}")
-            return {"success": False, "message": f"数据加载失败: {str(e)}"}
+            print(f"数据下载失败: {str(e)}")
+            return {"success": False, "message": f"数据下载失败: {str(e)}"}
     
     def download_data(self):
         """下载Qlib数据（备份旧数据后替换，多线程加速）"""

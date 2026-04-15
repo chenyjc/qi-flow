@@ -228,3 +228,6 @@ backend/mlflow.db
 
 # Streamlit cache
 .stlit/
+
+# Trae cache
+.trae/
