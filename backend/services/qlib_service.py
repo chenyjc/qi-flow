@@ -931,24 +931,32 @@ class QlibService:
             # 提取日期
             try:
                 dates = data.index.get_level_values('datetime').unique()
-                data_dict["dates"] = [date.strftime('%Y-%m-%d') for date in dates]
+                dates_list = [date.strftime('%Y-%m-%d') for date in dates]
+                dates_list = dates_list[-10:][::-1]
+                data_dict["dates"] = dates_list
             except Exception as e:
-                # 如果无法提取日期，使用索引
-                data_dict["dates"] = [str(i) for i in range(len(data))]
+                data_dict["dates"] = [str(i) for i in range(10)][::-1]
 
             # 提取股票
             data_dict["stocks"] = [selected_stock]
 
             # 提取数据
             try:
+                open_list = data['$open'].tolist() if '$open' in data.columns else []
+                close_list = data['$close'].tolist() if '$close' in data.columns else []
+                high_list = data['$high'].tolist() if '$high' in data.columns else []
+                low_list = data['$low'].tolist() if '$low' in data.columns else []
+                volume_list = data['$volume'].tolist() if '$volume' in data.columns else []
+                amount_list = data['$amount'].tolist() if '$amount' in data.columns else []
+                
                 stock_data_dict = {
                     "stock": selected_stock,
-                    "open": data['$open'].tolist() if '$open' in data.columns else [],
-                    "close": data['$close'].tolist() if '$close' in data.columns else [],
-                    "high": data['$high'].tolist() if '$high' in data.columns else [],
-                    "low": data['$low'].tolist() if '$low' in data.columns else [],
-                    "volume": data['$volume'].tolist() if '$volume' in data.columns else [],
-                    "amount": data['$amount'].tolist() if '$amount' in data.columns else []
+                    "open": open_list[-10:][::-1],
+                    "close": close_list[-10:][::-1],
+                    "high": high_list[-10:][::-1],
+                    "low": low_list[-10:][::-1],
+                    "volume": volume_list[-10:][::-1],
+                    "amount": amount_list[-10:][::-1]
                 }
                 data_dict["data"].append(stock_data_dict)
             except Exception as e:
