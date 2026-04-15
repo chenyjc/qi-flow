@@ -8,10 +8,11 @@ FRONTEND_PID_FILE="$ROOT_DIR/frontend_nohup.pid"
 BACKEND_LOG="$ROOT_DIR/backend_nohup.log"
 FRONTEND_LOG="$ROOT_DIR/frontend_nohup.log"
 
-function is_running() {
+is_running() {
     local pid="$1"
     [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
 }
+
 
 if [ -f "$BACKEND_PID_FILE" ]; then
     PID=$(cat "$BACKEND_PID_FILE")
@@ -31,6 +32,14 @@ if [ -f "$FRONTEND_PID_FILE" ]; then
     else
         rm -f "$FRONTEND_PID_FILE"
     fi
+fi
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+if [ -f "$BACKEND_LOG" ]; then
+    mv "$BACKEND_LOG" "$ROOT_DIR/backend_nohup_$TIMESTAMP.log"
+fi
+if [ -f "$FRONTEND_LOG" ]; then
+    mv "$FRONTEND_LOG" "$ROOT_DIR/frontend_nohup_$TIMESTAMP.log"
 fi
 
 echo "启动后台服务，日志写入：$BACKEND_LOG"

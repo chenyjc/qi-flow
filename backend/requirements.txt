@@ -10,4 +10,7 @@ seaborn
 statsmodels
 mplfinance
 python-multipart
-qlib
+pyqlib
+mlflow
+plotly
+tqdm
