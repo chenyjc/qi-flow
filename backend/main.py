@@ -33,8 +33,9 @@ app.include_router(qlib.router, prefix="/api/qlib", tags=["qlib"])
 
 # 配置静态文件服务
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-if os.path.exists(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+assets_dir = os.path.join(static_dir, "assets")
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 @app.get("/")
 async def root():

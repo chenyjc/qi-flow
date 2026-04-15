@@ -1,57 +1,50 @@
 #!/bin/bash
 
-# 后台启动脚本：使用 nohup 运行 start_backend.sh 和 start_frontend.sh
+# 后台启动脚本：使用 nohup 运行后端服务（前后端合一）
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BACKEND_PID_FILE="$ROOT_DIR/backend_nohup.pid"
-FRONTEND_PID_FILE="$ROOT_DIR/frontend_nohup.pid"
-BACKEND_LOG="$ROOT_DIR/backend_nohup.log"
-FRONTEND_LOG="$ROOT_DIR/frontend_nohup.log"
+PID_FILE="$ROOT_DIR/backend_nohup.pid"
+LOG="$ROOT_DIR/backend_nohup.log"
 
 is_running() {
     local pid="$1"
     [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
 }
 
+start_background_script() {
+    local script="$1"
+    local log="$2"
+    local pidfile="$3"
 
-if [ -f "$BACKEND_PID_FILE" ]; then
-    PID=$(cat "$BACKEND_PID_FILE")
-    if is_running "$PID"; then
-        echo "后台服务已在运行：backend pid=$PID"
-        exit 0
+    if command -v setsid >/dev/null 2>&1; then
+        nohup setsid bash "$script" > "$log" 2>&1 &
     else
-        rm -f "$BACKEND_PID_FILE"
+        nohup bash "$script" > "$log" 2>&1 &
     fi
-fi
 
-if [ -f "$FRONTEND_PID_FILE" ]; then
-    PID=$(cat "$FRONTEND_PID_FILE")
+    local pid=$!
+    echo "$pid" > "$pidfile"
+    echo "$pid"
+}
+
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
     if is_running "$PID"; then
-        echo "前端服务已在运行：frontend pid=$PID"
+        echo "后台服务已在运行：pid=$PID"
         exit 0
     else
-        rm -f "$FRONTEND_PID_FILE"
+        rm -f "$PID_FILE"
     fi
 fi
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-if [ -f "$BACKEND_LOG" ]; then
-    mv "$BACKEND_LOG" "$ROOT_DIR/backend_nohup_$TIMESTAMP.log"
-fi
-if [ -f "$FRONTEND_LOG" ]; then
-    mv "$FRONTEND_LOG" "$ROOT_DIR/frontend_nohup_$TIMESTAMP.log"
+if [ -f "$LOG" ]; then
+    mv "$LOG" "$ROOT_DIR/backend_nohup_$TIMESTAMP.log"
 fi
 
-echo "启动后台服务，日志写入：$BACKEND_LOG"
-nohup bash "$ROOT_DIR/start_backend.sh" > "$BACKEND_LOG" 2>&1 &
-BACKEND_PID=$!
-echo "$BACKEND_PID" > "$BACKEND_PID_FILE"
-
-echo "启动前端服务，日志写入：$FRONTEND_LOG"
-nohup bash "$ROOT_DIR/start_frontend.sh" > "$FRONTEND_LOG" 2>&1 &
-FRONTEND_PID=$!
-echo "$FRONTEND_PID" > "$FRONTEND_PID_FILE"
+echo "启动后台服务，日志写入：$LOG"
+BACKEND_PID=$(start_background_script "$ROOT_DIR/start_backend.sh" "$LOG" "$PID_FILE")
 
 echo "启动完成。"
 echo "backend pid=$BACKEND_PID"
-echo "frontend pid=$FRONTEND_PID"
+echo "访问地址: http://localhost:8008"
