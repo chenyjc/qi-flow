@@ -34,10 +34,10 @@ class QlibService:
         try:
             if force:
                 qlib._initialized = False
-            
+
             if not hasattr(qlib, '_initialized') or not qlib._initialized:
                 qlib.init(provider_uri=self.provider_uri, region=REG_CN)
-            
+
             sqlite_uri = "sqlite:///mlflow.db"
             R.set_uri(sqlite_uri)
         except Exception as e:
@@ -322,15 +322,16 @@ class QlibService:
         """下载Qlib数据（备份旧数据后替换，多线程加速）"""
         return self.download_data_with_progress(None)
     
-    def train_model_with_progress(self, progress_callback, market, benchmark, train_start_date, train_end_date, 
-                    valid_start_date, valid_end_date, test_start_date, test_end_date, 
-                    model_type, lr, max_depth, num_leaves, subsample, colsample_bytree):
+    def train_model_with_progress(self, progress_callback, market, benchmark, train_start_date, train_end_date,
+                    valid_start_date, valid_end_date, test_start_date, test_end_date,
+                    model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
+                    seed=42, num_threads=1):
         """训练模型（带进度回调）"""
         try:
             progress_callback(0, "开始训练模型...")
-            
+
             progress_callback(10, "配置数据处理参数...")
-            
+
             # 数据处理配置
             data_handler_config = {
                 "start_time": train_start_date,
@@ -339,9 +340,9 @@ class QlibService:
                 "fit_end_time": valid_end_date,
                 "instruments": market,
             }
-            
+
             progress_callback(20, "构建任务配置...")
-            
+
             # 构建任务配置
             task = {
                 "model": {
@@ -356,8 +357,8 @@ class QlibService:
                         "lambda_l2": 580.9768,
                         "max_depth": max_depth,
                         "num_leaves": num_leaves,
-                        "num_threads": 1,
-                        "random_state": 42,
+                        "num_threads": num_threads,
+                        "random_state": seed,
                         "deterministic": True,
                     },
                 },
@@ -407,6 +408,8 @@ class QlibService:
                     valid_end_date=valid_end_date,
                     test_start_date=test_start_date,
                     test_end_date=test_end_date,
+                    fit_start_time=train_start_date,
+                    fit_end_time=valid_end_date,
                     model_type=model_type,
                     lr=lr,
                     max_depth=max_depth,
@@ -422,41 +425,228 @@ class QlibService:
                 
                 progress_callback(60, "训练模型中...")
                 model.fit(dataset)
-                
-                progress_callback(80, "保存模型...")
-                R.save_objects(trained_model=model)
-            
+
+                progress_callback(75, "生成预测结果...")
+                # 在训练记录中生成预测信号和标签
+                recorder = R.get_recorder()
+                sr = SignalRecord(model, dataset, recorder)
+                sr.generate()
+
+                progress_callback(80, "计算评估指标...")
+                # 加载预测和标签数据用于评估
+                pred = recorder.load_object("pred.pkl")
+                label = recorder.load_object("label.pkl")
+
+                # 合并预测和标签
+                pred_label = pd.concat([pred, label], axis=1)
+
+                # 计算IC指标
+                from qlib.workflow.record_temp import calc_ic, calc_long_short_prec, calc_long_short_return
+                ic, ric = calc_ic(pred.iloc[:, 0], label.iloc[:, 0])
+
+                # 计算长短期精度
+                long_pre, short_pre = calc_long_short_prec(pred.iloc[:, 0], label.iloc[:, 0], is_alpha=True)
+
+                # 计算长短期收益
+                long_short_r, long_avg_r = calc_long_short_return(pred.iloc[:, 0], label.iloc[:, 0])
+
+                # 计算关键指标
+                metrics = {
+                    "IC": float(ic.mean()),
+                    "ICIR": float(ic.mean() / ic.std()),
+                    "Rank_IC": float(ric.mean()),
+                    "Rank_ICIR": float(ric.mean() / ric.std()),
+                    "Long_precision": float(long_pre.mean()),
+                    "Short_precision": float(short_pre.mean()),
+                    "Long_Short_Avg_Return": float(long_short_r.mean()),
+                    "Long_Short_Avg_Sharpe": float(long_short_r.mean() / long_short_r.std()) if long_short_r.std() != 0 else 0,
+                }
+
+                # 保存指标
+                R.log_metrics(**metrics)
+
+                # 生成分组收益数据用于可视化
+                pred_label_df = pred_label.copy()
+                pred_label_df.columns = ['score', 'label']
+
+                # 计算分组收益 (5组)
+                N = 5
+                pred_label_drop = pred_label_df.dropna(subset=['score'])
+                pred_label_sorted = pred_label_drop.sort_values('score', ascending=False)
+
+                group_returns = {}
+                for i in range(N):
+                    group_name = f"Group{i+1}"
+                    group_data = pred_label_sorted.groupby(level='datetime', group_keys=False).apply(
+                        lambda x: x.iloc[len(x)//N*i:len(x)//N*(i+1)]['label'].mean()
+                    )
+                    group_returns[group_name] = group_data.dropna().tolist()
+
+                # 多空收益
+                long_short = pd.Series(group_returns['Group1']) - pd.Series(group_returns['Group5'])
+                long_avg = pd.Series(group_returns['Group1']) - pred_label_df.groupby(level='datetime')['label'].mean()
+
+                group_returns['long_short'] = long_short.dropna().tolist()
+                group_returns['long_average'] = long_avg.dropna().tolist()
+                group_returns['dates'] = pred_label_df.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
+
+                # 计算IC序列
+                ic_data = {
+                    'dates': ic.index.strftime('%Y-%m-%d').tolist(),
+                    'ic': ic.tolist(),
+                    'rank_ic': ric.tolist()
+                }
+
+                # 保存可视化数据
+                viz_data = {
+                    'metrics': metrics,
+                    'group_returns': group_returns,
+                    'ic_data': ic_data
+                }
+                R.save_objects(viz_data=viz_data)
+
+                progress_callback(85, "保存模型...")
+
+                # 获取 recorder 以便后续加载
+                recorder = R.get_recorder()
+                rid = recorder.id
+                print(f"保存模型到 recorder: {rid}")
+
+                # 保存模型 - 使用 recorder 直接保存
+                import os
+                import pickle
+                import tempfile
+
+                # 创建临时文件保存模型
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pkl') as tmp:
+                    pickle.dump(model, tmp)
+                    tmp_path = tmp.name
+
+                # 使用 recorder 保存模型文件
+                recorder.save_objects(trained_model=model)
+
+                # 同时保存为本地文件作为备份
+                mlruns_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mlruns")
+                model_backup_dir = os.path.join(mlruns_dir, "model_backups")
+                os.makedirs(model_backup_dir, exist_ok=True)
+                backup_path = os.path.join(model_backup_dir, f"{rid}_trained_model.pkl")
+                with open(backup_path, 'wb') as f:
+                    pickle.dump(model, f)
+                print(f"模型备份保存到: {backup_path}")
+
+                # 删除临时文件
+                os.unlink(tmp_path)
+
+                print(f"模型保存完成")
+
             progress_callback(90, "训练完成，生成记录ID...")
-            
+
             return {"success": True, "recorder_id": rid, "message": "模型训练完成！"}
         except Exception as e:
             progress_callback(-1, f"模型训练失败: {str(e)}")
             return {"success": False, "message": f"模型训练失败: {str(e)}"}
-    
-    def train_model(self, market, benchmark, train_start_date, train_end_date, 
-                    valid_start_date, valid_end_date, test_start_date, test_end_date, 
-                    model_type, lr, max_depth, num_leaves, subsample, colsample_bytree):
+
+    def train_model(self, market, benchmark, train_start_date, train_end_date,
+                    valid_start_date, valid_end_date, test_start_date, test_end_date,
+                    model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
+                    seed=42, num_threads=1):
         """训练模型"""
-        return self.train_model_with_progress(None, market, benchmark, train_start_date, train_end_date, 
-                    valid_start_date, valid_end_date, test_start_date, test_end_date, 
-                    model_type, lr, max_depth, num_leaves, subsample, colsample_bytree)
+        return self.train_model_with_progress(None, market, benchmark, train_start_date, train_end_date,
+                    valid_start_date, valid_end_date, test_start_date, test_end_date,
+                    model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
+                    seed, num_threads)
     
-    def backtest_model(self, recorder_id, market, benchmark, start_date, end_date, 
+    def backtest_model(self, recorder_id, market, benchmark, start_date, end_date,
                       initial_account, topk, n_drop, strategy_type):
         """执行回测"""
         try:
             # 获取指定ID的记录器
             recorder = R.get_recorder(recorder_id=recorder_id, experiment_name="train_model")
-            
+
+            # 检查记录器中的对象列表
+            try:
+                # 尝试列出记录器中的对象
+                artifacts = recorder.list_artifacts()
+                print(f"记录器 {recorder_id} 中的对象: {artifacts}")
+            except Exception as e:
+                print(f"无法列出对象: {e}")
+
             # 加载模型
-            model = recorder.load_object("trained_model")
-            
+            try:
+                model = recorder.load_object("trained_model")
+                print(f"成功加载模型 from recorder {recorder_id}")
+            except Exception as e:
+                error_msg = str(e)
+                print(f"加载模型失败: {error_msg}")
+                # 尝试其他可能的名称
+                try:
+                    model = recorder.load_object("model")
+                    print(f"成功从 'model' 加载模型")
+                except:
+                    # 如果都不行，尝试从pickle文件直接加载
+                    import os
+                    import glob
+                    mlruns_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mlruns")
+                    print(f"搜索mlruns目录: {mlruns_dir}")
+
+                    # 首先检查备份目录
+                    model_backup_dir = os.path.join(mlruns_dir, "model_backups")
+                    backup_path = os.path.join(model_backup_dir, f"{recorder_id}_trained_model.pkl")
+
+                    model_loaded = False
+                    if os.path.exists(backup_path):
+                        try:
+                            import pickle
+                            with open(backup_path, 'rb') as f:
+                                model = pickle.load(f)
+                            print(f"成功从备份文件加载模型: {backup_path}")
+                            model_loaded = True
+                        except Exception as e2:
+                            print(f"从备份文件加载失败: {e2}")
+
+                    if not model_loaded:
+                        print(f"备份文件不存在或加载失败: {backup_path}")
+
+                        # 尝试找到模型文件
+                        model_paths = []
+                        for root, dirs, files in os.walk(mlruns_dir):
+                            if recorder_id in root:
+                                for file in files:
+                                    if file.endswith('.pkl') or file == 'trained_model':
+                                        model_paths.append(os.path.join(root, file))
+
+                        print(f"找到的模型文件: {model_paths}")
+
+                        if not model_paths:
+                            return {"success": False, "message": f"回测和分析失败: 无法找到训练好的模型。请确保模型训练成功完成。错误: {error_msg}"}
+
+                        # 尝试从找到的路径加载
+                        for model_path in model_paths:
+                            try:
+                                import pickle
+                                with open(model_path, 'rb') as f:
+                                    model = pickle.load(f)
+                                print(f"成功从 {model_path} 加载模型")
+                                model_loaded = True
+                                break
+                            except Exception as e2:
+                                print(f"从 {model_path} 加载失败: {e2}")
+                                continue
+
+                        if not model_loaded:
+                            return {"success": False, "message": f"回测和分析失败: 无法加载训练好的模型。错误: {error_msg}"}
+
+            # 读取训练时的 fit 时间参数（用于特征标准化，防止数据泄露）
+            train_params = recorder.list_params()
+            fit_start_time = train_params.get('fit_start_time', start_date)
+            fit_end_time = train_params.get('fit_end_time', end_date)
+
             # 加载数据集（需要重新构建）
             data_handler_config = {
                 "start_time": start_date,
                 "end_time": end_date,
-                "fit_start_time": start_date,
-                "fit_end_time": end_date,
+                "fit_start_time": fit_start_time,  # 使用训练时的统计时间
+                "fit_end_time": fit_end_time,      # 使用训练时的统计时间
                 "instruments": market,
             }
             
@@ -952,6 +1142,123 @@ class QlibService:
             print(f"预览数据失败: {str(e)}")
             return {"success": False, "message": f"获取数据失败: {str(e)}"}
 
+    def get_train_result(self, recorder_id):
+        """获取训练结果（模型评估可视化数据）"""
+        try:
+            # 获取训练记录
+            recorder = R.get_recorder(recorder_id=recorder_id, experiment_name="train_model")
+
+            # 获取参数
+            params = recorder.list_params()
+
+            # 辅助函数：安全处理数值（处理NaN和Inf）
+            def safe_value(value):
+                if value is None:
+                    return None
+                if isinstance(value, (int, float)):
+                    if pd.isna(value) or np.isnan(value) or np.isinf(value):
+                        return None
+                    return float(value)
+                return value
+
+            def safe_list(values):
+                return [safe_value(v) for v in values]
+
+            # 尝试加载可视化数据
+            viz_data = None
+            try:
+                viz_data = recorder.load_object("viz_data")
+            except:
+                pass
+
+            # 尝试加载预测和标签数据（如果没有viz_data）
+            if viz_data is None:
+                try:
+                    pred = recorder.load_object("pred.pkl")
+                    label = recorder.load_object("label.pkl")
+
+                    # 计算IC指标
+                    from qlib.workflow.record_temp import calc_ic, calc_long_short_prec, calc_long_short_return
+                    ic, ric = calc_ic(pred.iloc[:, 0], label.iloc[:, 0])
+                    long_pre, short_pre = calc_long_short_prec(pred.iloc[:, 0], label.iloc[:, 0], is_alpha=True)
+
+                    ic_mean = ic.mean()
+                    ic_std = ic.std()
+                    ric_mean = ric.mean()
+                    ric_std = ric.std()
+
+                    metrics = {
+                        "IC": safe_value(ic_mean),
+                        "ICIR": safe_value(ic_mean / ic_std) if ic_std and ic_std != 0 else None,
+                        "Rank_IC": safe_value(ric_mean),
+                        "Rank_ICIR": safe_value(ric_mean / ric_std) if ric_std and ric_std != 0 else None,
+                        "Long_precision": safe_value(long_pre.mean()),
+                        "Short_precision": safe_value(short_pre.mean()),
+                    }
+
+                    # 生成分组收益数据
+                    pred_label = pd.concat([pred, label], axis=1)
+                    pred_label.columns = ['score', 'label']
+
+                    N = 5
+                    pred_label_drop = pred_label.dropna(subset=['score'])
+                    pred_label_sorted = pred_label_drop.sort_values('score', ascending=False)
+
+                    group_returns = {}
+                    for i in range(N):
+                        group_name = f"Group{i+1}"
+                        group_data = pred_label_sorted.groupby(level='datetime', group_keys=False).apply(
+                            lambda x: x.iloc[len(x)//N*i:len(x)//N*(i+1)]['label'].mean()
+                        )
+                        group_returns[group_name] = safe_list(group_data.dropna().tolist())
+
+                    long_short = pd.Series(group_returns['Group1']) - pd.Series(group_returns['Group5'])
+                    group_returns['long_short'] = safe_list(long_short.dropna().tolist())
+                    group_returns['dates'] = pred_label.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
+
+                    ic_data = {
+                        'dates': ic.index.strftime('%Y-%m-%d').tolist(),
+                        'ic': safe_list(ic.tolist()),
+                        'rank_ic': safe_list(ric.tolist())
+                    }
+
+                    viz_data = {
+                        'metrics': metrics,
+                        'group_returns': group_returns,
+                        'ic_data': ic_data
+                    }
+                except Exception as e:
+                    return {"success": False, "message": f"无法加载训练结果数据: {str(e)}"}
+            else:
+                # 如果viz_data存在，也需要处理其中的NaN值
+                # 处理metrics
+                if 'metrics' in viz_data:
+                    viz_data['metrics'] = {k: safe_value(v) for k, v in viz_data['metrics'].items()}
+
+                # 处理group_returns
+                if 'group_returns' in viz_data:
+                    for key in viz_data['group_returns']:
+                        if key != 'dates':
+                            viz_data['group_returns'][key] = safe_list(viz_data['group_returns'][key])
+
+                # 处理ic_data
+                if 'ic_data' in viz_data:
+                    if 'ic' in viz_data['ic_data']:
+                        viz_data['ic_data']['ic'] = safe_list(viz_data['ic_data']['ic'])
+                    if 'rank_ic' in viz_data['ic_data']:
+                        viz_data['ic_data']['rank_ic'] = safe_list(viz_data['ic_data']['rank_ic'])
+
+            return {
+                "success": True,
+                "recorder_id": recorder_id,
+                "params": params,
+                "metrics": viz_data.get('metrics', {}) if viz_data else {},
+                "group_returns": viz_data.get('group_returns', {}) if viz_data else {},
+                "ic_data": viz_data.get('ic_data', {}) if viz_data else {}
+            }
+        except Exception as e:
+            return {"success": False, "message": f"获取训练结果失败: {str(e)}"}
+
     def delete_train_recorder(self, recorder_id):
         """删除训练记录"""
         try:
@@ -959,9 +1266,33 @@ class QlibService:
             exp = R.get_exp(experiment_name="train_model")
             # 删除指定的记录器
             exp.delete_recorder(recorder_id)
+            
+            # 清理mlruns目录中的对应文件
+            self._clean_mlruns_files(recorder_id)
+            
             return {"success": True, "message": f"训练记录 {recorder_id} 已删除"}
         except Exception as e:
             return {"success": False, "message": f"删除训练记录失败: {str(e)}"}
+
+    def delete_all_train_recorders(self):
+        """删除所有训练记录"""
+        try:
+            # 获取实验
+            exp = R.get_exp(experiment_name="train_model")
+            # 获取所有记录器
+            recorders = exp.list_recorders(rtype="list")
+            deleted_count = 0
+            for recorder in recorders:
+                try:
+                    exp.delete_recorder(recorder.id)
+                    # 清理mlruns目录中的对应文件
+                    self._clean_mlruns_files(recorder.id)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"删除记录 {recorder.id} 失败: {e}")
+            return {"success": True, "message": f"已删除 {deleted_count} 条训练记录"}
+        except Exception as e:
+            return {"success": False, "message": f"删除所有训练记录失败: {str(e)}"}
 
     def delete_backtest_recorder(self, recorder_id):
         """删除回测记录"""
@@ -970,6 +1301,27 @@ class QlibService:
             exp = R.get_exp(experiment_name="backtest_analysis")
             # 删除指定的记录器
             exp.delete_recorder(recorder_id)
+            
+            # 清理mlruns目录中的对应文件
+            self._clean_mlruns_files(recorder_id)
+            
             return {"success": True, "message": f"回测记录 {recorder_id} 已删除"}
         except Exception as e:
             return {"success": False, "message": f"删除回测记录失败: {str(e)}"}
+
+    def _clean_mlruns_files(self, recorder_id):
+        """清理mlruns目录中的文件"""
+        try:
+            import shutil
+            # 遍历mlruns目录，查找包含recorder_id的目录
+            mlruns_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mlruns")
+            if os.path.exists(mlruns_dir):
+                for root, dirs, files in os.walk(mlruns_dir):
+                    for dir_name in dirs:
+                        if recorder_id in dir_name:
+                            dir_path = os.path.join(root, dir_name)
+                            if os.path.isdir(dir_path):
+                                shutil.rmtree(dir_path)
+                                print(f"已删除文件: {dir_path}")
+        except Exception as e:
+            print(f"清理mlruns文件失败: {e}")

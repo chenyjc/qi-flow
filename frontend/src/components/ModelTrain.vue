@@ -140,6 +140,20 @@
             </div>
             <el-slider v-model="config.colsample_bytree" :min="0.5" :max="1" :step="0.0001" />
           </div>
+          <div class="param-slider">
+            <div class="slider-header">
+              <label class="config-label">随机种子</label>
+              <span class="slider-value">{{ config.seed }}</span>
+            </div>
+            <el-slider v-model="config.seed" :min="0" :max="1000" :step="1" />
+          </div>
+          <div class="param-slider">
+            <div class="slider-header">
+              <label class="config-label">多线程数量</label>
+              <span class="slider-value">{{ config.num_threads }}</span>
+            </div>
+            <el-slider v-model="config.num_threads" :min="1" :max="16" :step="1" />
+          </div>
         </div>
       </div>
     </div>
@@ -204,7 +218,9 @@ const config = reactive({
   max_depth: 8,
   num_leaves: 210,
   subsample: 0.8789,
-  colsample_bytree: 0.8879
+  colsample_bytree: 0.8879,
+  seed: 42,
+  num_threads: 1
 })
 
 const marketLabels = {
@@ -270,7 +286,7 @@ const trainModel = async () => {
             if (data.progress === 100) {
               training.value = false
               showProgress.value = false
-              message.value = `训练完成！记录ID: ${data.recorder_id}`
+              message.value = `训练完成！记录ID: ${data.recorder_id}。请前往"模型评估"页面查看详细结果。`
               messageType.value = 'success'
               return
             }

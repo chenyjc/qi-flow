@@ -23,6 +23,8 @@ class TrainRequest(BaseModel):
     num_leaves: int = 210
     subsample: float = 0.8789
     colsample_bytree: float = 0.8879
+    seed: int = 42
+    num_threads: int = 1
 
 class BacktestRequest(BaseModel):
     recorder_id: str
@@ -142,7 +144,9 @@ async def train_model_stream(request: TrainRequest):
                     max_depth=request.max_depth,
                     num_leaves=request.num_leaves,
                     subsample=request.subsample,
-                    colsample_bytree=request.colsample_bytree
+                    colsample_bytree=request.colsample_bytree,
+                    seed=request.seed,
+                    num_threads=request.num_threads
                 )
             except Exception as e:
                 error_holder[0] = e
@@ -188,7 +192,9 @@ async def train_model(request: TrainRequest):
             max_depth=request.max_depth,
             num_leaves=request.num_leaves,
             subsample=request.subsample,
-            colsample_bytree=request.colsample_bytree
+            colsample_bytree=request.colsample_bytree,
+            seed=request.seed,
+            num_threads=request.num_threads
         )
         return result
     except Exception as e:
@@ -209,6 +215,15 @@ async def backtest_model(request: BacktestRequest):
             n_drop=request.n_drop,
             strategy_type=request.strategy_type
         )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/train_result/{recorder_id}")
+async def get_train_result(recorder_id: str):
+    """获取训练结果（模型评估可视化数据）"""
+    try:
+        result = qlib_service.get_train_result(recorder_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -257,6 +272,15 @@ async def delete_train_recorder(recorder_id: str):
     """删除训练记录"""
     try:
         result = qlib_service.delete_train_recorder(recorder_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/recorders")
+async def delete_all_train_recorders():
+    """删除所有训练记录"""
+    try:
+        result = qlib_service.delete_all_train_recorders()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
