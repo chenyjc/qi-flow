@@ -101,11 +101,8 @@ async def download_qlib_data():
 async def update_stock_database():
     """更新股票信息数据库"""
     try:
-        success = qlib_service.update_stock_db()
-        if success:
-            return {"success": True, "message": "股票信息数据库更新成功！"}
-        else:
-            return {"success": False, "message": "股票信息数据库更新失败"}
+        result = qlib_service.update_stock_db()
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

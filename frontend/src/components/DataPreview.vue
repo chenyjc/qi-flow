@@ -27,7 +27,7 @@
         </span>
       </button>
       <button class="action-btn update" :disabled="updating" @click="updateStockDB">
-        <span v-if="!updating">🔄 更新股票</span>
+        <span v-if="!updating">🔄 更新股票信息</span>
         <span v-else class="loading-content">
           <span class="mini-spinner"></span>
           <span>更新中...</span>

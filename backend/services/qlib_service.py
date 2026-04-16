@@ -69,12 +69,13 @@ class QlibService:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         
-        # 创建股票信息表
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS stock_info (
-            code TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
             name TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            market TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (code, market)
         )
         ''')
         
@@ -82,35 +83,46 @@ class QlibService:
         conn.close()
     
     def update_stock_db(self):
-        """更新股票信息数据库"""
+        """更新股票信息数据库（获取各指数成分股）"""
         try:
             import akshare as ak
-            # 获取A股所有股票信息
-            stock_info_df = ak.stock_info_a_code_name()
             
             DB_FILE = os.path.join(os.path.dirname(__file__), 'stock_info.db')
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
-            # 获取当前时间
             updated_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # 清空旧数据并插入新数据
             cursor.execute('DELETE FROM stock_info')
             
-            # 插入新数据
-            for _, row in stock_info_df.iterrows():
-                code = row['code']
-                name = row['name']
-                cursor.execute('INSERT INTO stock_info (code, name, updated_at) VALUES (?, ?, ?)', 
-                              (code, name, updated_at))
+            index_map = {
+                "csi300": "000300",
+                "csi500": "000905",
+                "csi800": "000906",
+                "csi1000": "000852"
+            }
+            
+            total_count = 0
+            for market, index_code in index_map.items():
+                try:
+                    index_stocks = ak.index_stock_cons(symbol=index_code)
+                    for _, row in index_stocks.iterrows():
+                        code = str(row.get('品种代码', row.get('code', '')))
+                        name = row.get('品种名称', row.get('name', ''))
+                        if code:
+                            cursor.execute('INSERT OR REPLACE INTO stock_info (code, name, market, updated_at) VALUES (?, ?, ?, ?)',
+                                          (code, name, market, updated_at))
+                            total_count += 1
+                    print(f"{market}: 获取 {len(index_stocks)} 只股票")
+                except Exception as e:
+                    print(f"获取 {market} 成分股失败: {e}")
             
             conn.commit()
             conn.close()
-            return True
+            return {"success": True, "message": f"已更新 {total_count} 只股票信息"}
         except Exception as e:
             print(f"更新股票数据库失败: {e}")
-            return False
+            return {"success": False, "message": f"更新失败: {str(e)}"}
     
     def get_stock_names_from_db(self, stock_keys):
         """从数据库获取股票名称"""
@@ -815,8 +827,22 @@ class QlibService:
     def preview_data(self, market="csi300"):
         """预览数据"""
         try:
-            # 使用固定的股票代码和日期范围
-            fixed_stocks = ['SH600000', 'SH600036', 'SH601318', 'SH601398', 'SH601857']
+            DB_FILE = os.path.join(os.path.dirname(__file__), 'stock_info.db')
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            query_market = market if market != "all" else "csi300"
+            cursor.execute('SELECT code FROM stock_info WHERE market = ? LIMIT 5', (query_market,))
+            rows = cursor.fetchall()
+            conn.close()
+            
+            fixed_stocks = []
+            for row in rows:
+                code = row[0]
+                fixed_stocks.append(f"SH{code}" if code.startswith('6') else f"SZ{code}")
+            
+            if not fixed_stocks:
+                fixed_stocks = ['SH600000', 'SH600036', 'SH601318', 'SH601398', 'SH601857']
 
             # 使用固定的日期范围（最近30天）
             import datetime

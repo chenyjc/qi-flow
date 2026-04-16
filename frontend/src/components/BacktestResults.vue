@@ -140,28 +140,60 @@
     </div>
 
     <!-- 持仓浮动弹窗 -->
-    <div v-if="showPositionPopup && positions.length" class="position-popup">
-      <div class="popup-header">
-        <span>💼 {{ selectedDate }} 持仓明细</span>
-        <button class="popup-close" @click="closePopup">✕</button>
-      </div>
-      <div class="popup-table">
-        <div class="popup-row popup-header-row">
-          <span>股票代码</span>
-          <span>股票名称</span>
-          <span>权重</span>
-          <span>数量</span>
-          <span>金额</span>
+    <div v-if="showPositionPopup" class="position-popup-overlay" @click="closePopup">
+      <div class="position-popup" @click.stop>
+        <div class="popup-header">
+          <span>💼 {{ selectedDate }} 持仓明细</span>
+          <button class="popup-close" @click="closePopup">✕</button>
         </div>
-        <div v-for="p in positions" :key="p.stock_code" class="popup-row">
-          <span>{{ p.stock_code }}</span>
-          <span>{{ p.stock_name }}</span>
-          <span>{{ p.weight.toFixed(4) }}</span>
-          <span>{{ p.amount.toFixed(0) }}</span>
-          <span>{{ p.hold_value.toFixed(2) }}</span>
+        <div class="popup-table">
+          <el-table :data="positions" style="width: 100%" size="small">
+            <el-table-column prop="stock_code" label="股票代码" align="center" width="90" />
+            <el-table-column prop="stock_name" label="股票名称" align="center" width="100" />
+            <el-table-column prop="weight" label="权重" align="center" width="80">
+              <template #default="{ row }">
+                <span>{{ (row.weight * 100).toFixed(2) }}%</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="hold_days" label="持仓天数" align="center" width="80" />
+            <el-table-column prop="amount" label="数量" align="center" width="90">
+              <template #default="{ row }">
+                <span>{{ formatNumber(row.amount) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="cost_price" label="成本价" align="center" width="90">
+              <template #default="{ row }">
+                <span>¥{{ row.cost_price.toFixed(2) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="current_price" label="当日价" align="center" width="90">
+              <template #default="{ row }">
+                <span>¥{{ row.current_price.toFixed(2) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="hold_value" label="持仓金额" align="center" width="110">
+              <template #default="{ row }">
+                <span>¥{{ formatCurrency(row.hold_value) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="profit" label="盈亏" align="center" width="100">
+              <template #default="{ row }">
+                <span :class="row.profit >= 0 ? 'up-red' : 'down-green'">
+                  {{ row.profit >= 0 ? '+' : '' }}{{ formatCurrency(row.profit) }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="profit_rate" label="收益率" align="center" width="90">
+              <template #default="{ row }">
+                <span :class="row.profit_rate >= 0 ? 'up-red' : 'down-green'">
+                  {{ row.profit_rate >= 0 ? '+' : '' }}{{ row.profit_rate.toFixed(2) }}%
+                </span>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
+        <div class="popup-count">共 {{ positions.length }} 只股票</div>
       </div>
-      <div class="popup-count">共 {{ positions.length }} 只股票</div>
     </div>
 
     <!-- 持仓列表 -->
@@ -786,25 +818,33 @@ const deleteRecorder = async () => {
 }
 
 /* 持仓浮动弹窗 */
-.position-popup {
+.position-popup-overlay {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.position-popup {
   background: white;
   border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
-  max-width: 500px;
-  width: 90%;
-  max-height: 70vh;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  max-width: 1000px;
+  width: 95%;
+  max-height: 80vh;
   overflow: hidden;
   animation: popupIn 0.2s ease;
 }
 
 @keyframes popupIn {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .popup-header {
@@ -838,30 +878,7 @@ const deleteRecorder = async () => {
 .popup-table {
   padding: 12px;
   overflow-y: auto;
-  max-height: calc(70vh - 80px);
-}
-
-.popup-row {
-  display: grid;
-  grid-template-columns: 80px 80px 70px 60px 80px;
-  gap: 8px;
-  padding: 8px;
-  font-size: 13px;
-}
-
-.popup-header-row {
-  background: #f8f9fa;
-  font-weight: 600;
-  color: #5a6d7e;
-  border-radius: 6px;
-}
-
-.popup-row:not(.popup-header-row) {
-  border-bottom: 1px solid #e9ecef;
-}
-
-.popup-row:not(.popup-header-row):last-child {
-  border-bottom: none;
+  max-height: calc(80vh - 100px);
 }
 
 .popup-count {
