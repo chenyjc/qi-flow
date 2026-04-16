@@ -14,3 +14,7 @@ pyqlib
 mlflow
 plotly
 tqdm
+# 机器学习模型库
+catboost
+xgboost
+# torch

@@ -356,7 +356,9 @@ class QlibService:
                         "lambda_l2": 580.9768,
                         "max_depth": max_depth,
                         "num_leaves": num_leaves,
-                        "num_threads": 20,
+                        "num_threads": 1,
+                        "random_state": 42,
+                        "deterministic": True,
                     },
                 },
                 "dataset": {
@@ -389,8 +391,12 @@ class QlibService:
             
             progress_callback(50, "开始模型训练...")
             
-            # 训练模型
-            with R.start(experiment_name="train_model"):
+            # 生成记录名称
+            current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            train_recorder_name = f"{current_time}_{market}_{train_start_date.replace('-', '')}_to_{train_end_date.replace('-', '')}"
+            
+            # 训练模型 - 使用 recorder_name 参数指定名称
+            with R.start(experiment_name="train_model", recorder_name=train_recorder_name):
                 # 保存训练参数
                 R.log_params(
                     market=market,
@@ -410,12 +416,15 @@ class QlibService:
                     **flatten_dict(task)
                 )
                 
+                # 获取 recorder id
+                recorder = R.get_recorder()
+                rid = recorder.id
+                
                 progress_callback(60, "训练模型中...")
                 model.fit(dataset)
                 
                 progress_callback(80, "保存模型...")
                 R.save_objects(trained_model=model)
-                rid = R.get_recorder().id
             
             progress_callback(90, "训练完成，生成记录ID...")
             
@@ -504,8 +513,12 @@ class QlibService:
                 },
             }
             
-            # 执行回测和分析
-            with R.start(experiment_name="backtest_analysis"):
+            # 生成回测记录名称: 当前日期时间_市场_起止日期
+            current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            backtest_recorder_name = f"{current_time}_{market}_{start_date.replace('-', '')}_to_{end_date.replace('-', '')}"
+            
+            # 执行回测和分析 - 使用 recorder_name 参数指定名称
+            with R.start(experiment_name="backtest_analysis", recorder_name=backtest_recorder_name):
                 recorder = R.get_recorder()
                 ba_rid = recorder.id
                 
@@ -545,8 +558,11 @@ class QlibService:
             for rec in recorders:
                 rec_info = rec.info
                 rec_id = rec.id
+                # 获取 recorder 名称，如果没有则使用 id
+                rec_name = rec_info.get('name', rec_id)
                 recorder_list.append({
                     "id": rec_id,
+                    "name": rec_name,
                     "start_time": rec_info.get('start_time', '未知'),
                     "params": rec.list_params()
                 })
@@ -565,8 +581,11 @@ class QlibService:
             for rec in backtest_recorders:
                 rec_info = rec.info
                 rec_id = rec.id
+                # 获取 recorder 名称，如果没有则使用 id
+                rec_name = rec_info.get('name', rec_id)
                 recorder_list.append({
                     "id": rec_id,
+                    "name": rec_name,
                     "start_time": rec_info.get('start_time', '未知'),
                     "params": rec.list_params()
                 })
@@ -596,37 +615,37 @@ class QlibService:
             report_normal_df['cumulative_return'] = (1 + report_normal_df['return']).cumprod()
             report_normal_df['cumulative_bench'] = (1 + report_normal_df['bench']).cumprod()
             
-            total_return = (report_normal_df['cumulative_return'].iloc[-1] - 1) * 100
-            bench_return = (report_normal_df['cumulative_bench'].iloc[-1] - 1) * 100
-            excess_return_total = total_return - bench_return
+            total_return = float((report_normal_df['cumulative_return'].iloc[-1] - 1) * 100)
+            bench_return = float((report_normal_df['cumulative_bench'].iloc[-1] - 1) * 100)
+            excess_return_total = float(total_return - bench_return)
             
             # 获取其他分析指标
-            annualized_return = analysis_df.loc[('excess_return_with_cost', 'annualized_return'), 'risk']
-            information_ratio = analysis_df.loc[('excess_return_with_cost', 'information_ratio'), 'risk']
-            max_drawdown = analysis_df.loc[('excess_return_with_cost', 'max_drawdown'), 'risk']
+            annualized_return = float(analysis_df.loc[('excess_return_with_cost', 'annualized_return'), 'risk'])
+            information_ratio = float(analysis_df.loc[('excess_return_with_cost', 'information_ratio'), 'risk'])
+            max_drawdown = float(analysis_df.loc[('excess_return_with_cost', 'max_drawdown'), 'risk'])
             
             # 关键指标
             key_metrics = {
-                "total_return": round(total_return, 2),
-                "bench_return": round(bench_return, 2),
-                "excess_return": round(excess_return_total, 2),
-                "annualized_return": round(annualized_return, 4),
-                "information_ratio": round(information_ratio, 3),
-                "max_drawdown": round(max_drawdown, 4)
+                "total_return": float(round(total_return, 2)),
+                "bench_return": float(round(bench_return, 2)),
+                "excess_return": float(round(excess_return_total, 2)),
+                "annualized_return": float(round(annualized_return, 4)),
+                "information_ratio": float(round(information_ratio, 3)),
+                "max_drawdown": float(round(max_drawdown, 4))
             }
             
             # 累计收益数据
             cumulative_data = {
                 "dates": report_normal_df.index.strftime('%Y-%m-%d').tolist(),
-                "strategy": report_normal_df['cumulative_return'].tolist(),
-                "benchmark": report_normal_df['cumulative_bench'].tolist()
+                "strategy": [float(x) for x in report_normal_df['cumulative_return'].tolist()],
+                "benchmark": [float(x) for x in report_normal_df['cumulative_bench'].tolist()]
             }
             
             # 日收益数据
             daily_data = {
                 "dates": report_normal_df.index.strftime('%Y-%m-%d').tolist(),
-                "strategy": report_normal_df['return'].tolist(),
-                "benchmark": report_normal_df['bench'].tolist()
+                "strategy": [float(x) for x in report_normal_df['return'].tolist()],
+                "benchmark": [float(x) for x in report_normal_df['bench'].tolist()]
             }
             
             # 持仓数据
@@ -706,20 +725,20 @@ class QlibService:
 
                             # 计算盈利金额和收益率 - 与最终持仓相同的公式
                             if avg_price > 0 and current_price > 0:
-                                profit = (current_price - avg_price) * amount
-                                profit_rate = (current_price - avg_price) / avg_price * 100
+                                profit = float((current_price - avg_price) * amount)
+                                profit_rate = float((current_price - avg_price) / avg_price * 100)
 
                             date_positions.append({
                                 'stock_code': stock,
                                 'stock_name': stock_name,
                                 'weight': float(info.get('weight', 0)),
-                                'hold_days': count_day,
-                                'amount': amount,
-                                'cost_price': avg_price,
-                                'current_price': current_price,
-                                'hold_value': amount * current_price,
-                                'profit': round(profit, 2),
-                                'profit_rate': round(profit_rate, 2)
+                                'hold_days': int(count_day),
+                                'amount': float(amount),
+                                'cost_price': float(avg_price),
+                                'current_price': float(current_price),
+                                'hold_value': float(amount * current_price),
+                                'profit': float(round(profit, 2)),
+                                'profit_rate': float(round(profit_rate, 2))
                             })
                     all_positions_data[date.strftime('%Y-%m-%d')] = date_positions
                     print(f"Date {date.strftime('%Y-%m-%d')}: {len(date_positions)} positions")
@@ -782,21 +801,21 @@ class QlibService:
                             pass
                         
                         # 计算盈利金额和收益率
-                        profit = (current_price - avg_price) * amount if avg_price > 0 else 0
-                        profit_rate = (current_price - avg_price) / avg_price * 100 if avg_price > 0 else 0
+                        profit = float((current_price - avg_price) * amount) if avg_price > 0 else 0.0
+                        profit_rate = float((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0.0
                         
                         # 添加到positions_data
                         positions_data.append({
                             'stock_code': stock,
                             'stock_name': stock_name,
                             'weight': float(info.get('weight', 0)),
-                            'hold_days': count_day,
-                            'amount': amount,
-                            'cost_price': avg_price,
-                            'current_price': current_price,
-                            'hold_value': amount * current_price,
-                            'profit': profit,
-                            'profit_rate': profit_rate
+                            'hold_days': int(count_day),
+                            'amount': float(amount),
+                            'cost_price': float(avg_price),
+                            'current_price': float(current_price),
+                            'hold_value': float(amount * current_price),
+                            'profit': float(profit),
+                            'profit_rate': float(profit_rate)
                         })
             
             # 获取回测配置参数

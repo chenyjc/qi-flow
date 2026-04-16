@@ -102,6 +102,136 @@ pip install -r requirements.txt
 uvicorn backend.main:app --host 0.0.0.0 --port 8008
 ```
 
+## 训练方法详解
+
+模型训练核心实现在 [`backend/services/qlib_service.py`](backend/services/qlib_service.py)，采用 Qlib 量化投资框架进行端到端的机器学习流水线训练。
+
+### 1. 数据准备
+
+使用 **Alpha158** 数据处理器生成158个量化因子特征：
+
+```python
+data_handler_config = {
+    "start_time": train_start_date,    # 数据起始日期
+    "end_time": test_end_date,          # 数据结束日期
+    "fit_start_time": train_start_date, # 特征拟合起始日
+    "fit_end_time": valid_end_date,     # 特征拟合结束日
+    "instruments": market,              # 市场选择：csi300/csi500/csi800/csi1000
+}
+```
+
+### 2. 模型配置
+
+支持三种模型类型：**LightGBM**（默认）、**XGBoost**、**Linear**
+
+**LightGBM 默认参数**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `learning_rate` | 0.0421 | 学习率 |
+| `max_depth` | 8 | 树的最大深度 |
+| `num_leaves` | 210 | 叶子节点数 |
+| `subsample` | 0.8789 | 样本采样比例 |
+| `colsample_bytree` | 0.8879 | 特征采样比例 |
+| `lambda_l1` | 205.6999 | L1正则化系数 |
+| `lambda_l2` | 580.9768 | L2正则化系数 |
+
+```python
+"model": {
+    "class": "LGBModel",
+    "module_path": "qlib.contrib.model.gbdt",
+    "kwargs": {
+        "loss": "mse",          # 损失函数：均方误差
+        "learning_rate": lr,
+        "max_depth": max_depth,
+        "num_leaves": num_leaves,
+        "num_threads": 20,
+        "random_state": 42,
+    }
+}
+```
+
+### 3. 数据集划分
+
+采用三段式时间序列划分：
+
+```python
+"segments": {
+    "train": (train_start_date, train_end_date),   # 训练集
+    "valid": (valid_start_date, valid_end_date),   # 验证集
+    "test": (test_start_date, test_end_date),      # 测试集
+}
+```
+
+**默认时间范围**（动态计算）：
+- **训练集**：2008-01-01 至 1年前
+- **验证集**：1年前 至 3个月前
+- **测试集**：3个月前 至 今天
+
+### 4. 训练流程
+
+```python
+with R.start(experiment_name="train_model", recorder_name=train_recorder_name):
+    # 1. 记录训练参数到 MLflow
+    R.log_params(market=market, benchmark=benchmark, ...)
+    
+    # 2. 获取记录器 ID
+    recorder = R.get_recorder()
+    rid = recorder.id
+    
+    # 3. 执行模型训练
+    model.fit(dataset)
+    
+    # 4. 保存训练好的模型
+    R.save_objects(trained_model=model)
+```
+
+**关键特性**：
+- 使用 **MLflow** 进行实验跟踪（SQLite 后端存储）
+- 自动生成记录名称：`{时间}_{市场}_{训练起止日期}`
+- 支持流式进度返回（SSE）
+
+### 5. 策略回测
+
+训练完成后使用 **TopkDropoutStrategy** 进行回测验证：
+
+```python
+port_analysis_config = {
+    "strategy": {
+        "class": "TopkDropoutStrategy",
+        "kwargs": {
+            "model": model,
+            "dataset": dataset,
+            "topk": 10,       # 持仓数量（Top10股票）
+            "n_drop": 1,      # 每次调仓卖出数量
+        }
+    },
+    "backtest": {
+        "account": 1000000,               # 初始资金（100万）
+        "benchmark": "SH000300",          # 基准指数
+        "exchange_kwargs": {
+            "freq": "day",                # 日线级别
+            "limit_threshold": 0.095,     # 涨跌停限制
+            "deal_price": "close",        # 成交价格：收盘价
+            "open_cost": 0.0005,          # 开仓成本（万5）
+            "close_cost": 0.0015,         # 平仓成本（万15）
+            "min_cost": 5,                # 最低交易成本
+        }
+    }
+}
+```
+
+### 6. 完整数据流
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ GitHub数据源 │ → │ Alpha158    │ → │ LightGBM    │ → │ TopkDropout │ → │ 回测结果    │
+│ (日K线数据) │    │ 特征工程    │    │ 模型训练    │    │ 策略执行    │    │ (收益率/持仓)│
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```
+
+这是一个典型的 **量化投资机器学习流水线**：使用历史数据训练收益率预测模型，然后通过 Topk 选股策略模拟交易验证效果。
+
 ## API 接口
 
 ### Stock API (`/api/stock`)

@@ -1,3 +1,6 @@
+# Deprecated: This app is no longer maintained. 
+# Please use the new version in backend and frontend folders.
+
 # A Streamlit App for Qlib Trainnng & Backtest
 # Run with command below(activate venv first):
 # streamlit run streamlit/app.py
@@ -254,6 +257,7 @@ def train_model():
                         "max_depth": max_depth,
                         "num_leaves": num_leaves,
                         "num_threads": 20,
+                        "random_state": 42,
                     },
                 },
                 "dataset": {

@@ -8,3 +8,7 @@ tqdm
 akshare
 pandas
 numpy
+# 机器学习模型库
+catboost
+xgboost
+# torch

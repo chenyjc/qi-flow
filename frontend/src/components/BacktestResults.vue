@@ -8,10 +8,18 @@
       </div>
       <div class="selector-row">
         <el-select v-model="selectedId" @change="loadResult" class="selector-box" placeholder="选择回测记录">
-          <el-option v-for="r in recorders" :key="r.id" :label="`${r.start_time} - ${r.id}`" :value="r.id" />
+          <el-option v-for="r in recorders" :key="r.id" :label="r.name || `${r.start_time} - ${r.id}`" :value="r.id" />
         </el-select>
+        <button class="refresh-btn" @click="loadRecorders" :disabled="loadingRecorders">
+          <span v-if="!loadingRecorders">🔄</span>
+          <span v-else class="btn-spinner-small"></span>
+          <span>刷新</span>
+        </button>
         <button class="delete-btn" :disabled="!selectedId" @click="deleteRecorder">
           <span>🗑️</span> 删除
+        </button>
+        <button class="delete-all-btn" :disabled="!recorders.length" @click="deleteAllRecorders">
+          <span>🗑️🗑️</span> 全部删除
         </button>
       </div>
     </div>
@@ -350,6 +358,7 @@ Chart.register(...registerables)
 const API = '/api'
 
 const loading = ref(false)
+const loadingRecorders = ref(false)
 const selectedId = ref('')
 const recorders = ref([])
 const metrics = ref(null)
@@ -408,6 +417,7 @@ const paginatedTrades = computed(() => {
 onMounted(() => loadRecorders())
 
 const loadRecorders = async () => {
+  loadingRecorders.value = true
   try {
     const res = await axios.get(`${API}/qlib/backtest_recorders`)
     if (res.data.success) {
@@ -417,7 +427,11 @@ const loadRecorders = async () => {
         loadResult()
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    ElMessage.error('加载回测记录失败')
+  } finally {
+    loadingRecorders.value = false
+  }
 }
 
 const loadResult = async () => {
@@ -611,6 +625,37 @@ const deleteRecorder = async () => {
     if (e !== 'cancel') ElMessage.error(`删除失败`)
   }
 }
+
+const deleteAllRecorders = async () => {
+  try {
+    await ElMessageBox.confirm(`确定删除所有 ${recorders.value.length} 条回测记录？此操作不可恢复！`, '确认全部删除', { type: 'warning' })
+    let successCount = 0
+    let failCount = 0
+    for (const rec of recorders.value) {
+      try {
+        const res = await axios.delete(`${API}/qlib/backtest_recorders/${rec.id}`)
+        if (res.data.success) successCount++
+        else failCount++
+      } catch (e) {
+        failCount++
+      }
+    }
+    if (successCount > 0) {
+      ElMessage.success(`成功删除 ${successCount} 条记录`)
+    }
+    if (failCount > 0) {
+      ElMessage.error(`${failCount} 条记录删除失败`)
+    }
+    metrics.value = null
+    config.value = null
+    cumulativeData.value = null
+    dailyData.value = null
+    positions.value = []
+    loadRecorders()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(`删除失败`)
+  }
+}
 </script>
 
 <style scoped>
@@ -662,6 +707,63 @@ const deleteRecorder = async () => {
 
 .delete-btn:disabled {
   opacity: 0.5;
+}
+
+.refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: 1px solid #667eea;
+  background: white;
+  color: #667eea;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: #667eea;
+  color: white;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.delete-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: 1px solid #dc3545;
+  background: white;
+  color: #dc3545;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.delete-all-btn:hover:not(:disabled) {
+  background: #dc3545;
+  color: white;
+}
+
+.delete-all-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-spinner-small {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(102, 126, 234, 0.3);
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .loading-section {
