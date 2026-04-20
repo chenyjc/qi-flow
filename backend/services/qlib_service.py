@@ -586,7 +586,7 @@ class QlibService:
                     seed, num_threads)
     
     def backtest_model(self, recorder_id, market, benchmark, start_date, end_date,
-                      initial_account, topk, n_drop, strategy_type):
+                      initial_account, topk, n_drop, hold_days, stop_loss, strategy_type):
         """执行回测"""
         try:
             # 获取指定ID的记录器
@@ -714,6 +714,8 @@ class QlibService:
                         "dataset": dataset,
                         "topk": topk,
                         "n_drop": n_drop,
+                        "hold_days": hold_days,
+                        "stop_loss": stop_loss / 100.0,  # 转换为小数
                     },
                 },
                 "backtest": {
@@ -745,7 +747,7 @@ class QlibService:
                 recorder.log_params(
                     # 训练记录ID
                     train_recorder_id=str(recorder_id),
-                    
+
                     # 回测参数
                     backtest_market=market,
                     backtest_benchmark=benchmark,
@@ -754,6 +756,8 @@ class QlibService:
                     initial_account=initial_account,
                     topk=topk,
                     n_drop=n_drop,
+                    hold_days=hold_days,
+                    stop_loss=stop_loss,
                     strategy_type=strategy_type
                 )
                 
@@ -1056,6 +1060,8 @@ class QlibService:
                     "initial_account": backtest_config.get("initial_account", 1000000),
                     "topk": backtest_config.get("topk", 10),
                     "n_drop": backtest_config.get("n_drop", 1),
+                    "hold_days": backtest_config.get("hold_days", 3),
+                    "stop_loss": backtest_config.get("stop_loss", 5.0),
                     "strategy_type": backtest_config.get("strategy_type", "TopkDropoutStrategy")
                 }
             }
@@ -1245,6 +1251,34 @@ class QlibService:
                     group_returns['long_short'] = safe_list(long_short.dropna().tolist())
                     group_returns['dates'] = pred_label.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
 
+                    # 尝试从参数获取测试集日期范围，如果不存在则使用全部数据
+                    test_start = params.get('test_start_date', '')
+                    test_end = params.get('test_end_date', '')
+                    test_returns = {}
+
+                    if test_start and test_end:
+                        try:
+                            test_pred_label = pred_label[
+                                (pred_label.index.get_level_values('datetime') >= test_start) &
+                                (pred_label.index.get_level_values('datetime') <= test_end)
+                            ].copy()
+
+                            if len(test_pred_label) > 0:
+                                test_pred_label_sorted = test_pred_label.sort_values('score', ascending=False)
+
+                                for i in range(N):
+                                    group_name = f"Group{i+1}"
+                                    group_data = test_pred_label_sorted.groupby(level='datetime', group_keys=False).apply(
+                                        lambda x: x.iloc[len(x)//N*i:len(x)//N*(i+1)]['label'].mean()
+                                    )
+                                    test_returns[group_name] = safe_list(group_data.dropna().tolist())
+
+                                test_long_short = pd.Series(test_returns['Group1']) - pd.Series(test_returns['Group5'])
+                                test_returns['long_short'] = safe_list(test_long_short.dropna().tolist())
+                                test_returns['dates'] = test_pred_label.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
+                        except Exception as e:
+                            print(f"计算测试集收益失败: {e}")
+
                     ic_data = {
                         'dates': ic.index.strftime('%Y-%m-%d').tolist(),
                         'ic': safe_list(ic.tolist()),
@@ -1254,6 +1288,7 @@ class QlibService:
                     viz_data = {
                         'metrics': metrics,
                         'group_returns': group_returns,
+                        'test_returns': test_returns,
                         'ic_data': ic_data
                     }
                 except Exception as e:

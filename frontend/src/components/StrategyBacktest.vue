@@ -64,10 +64,19 @@
           </div>
           <div class="param-slider">
             <div class="slider-header">
-              <label class="config-label">调仓卖出数</label>
-              <span class="slider-value">{{ config.n_drop }}</span>
+              <label class="config-label">持仓周期 (天)</label>
+              <span class="slider-value">{{ config.hold_days }}</span>
             </div>
-            <el-slider v-model="config.n_drop" :min="1" :max="10" :step="1" />
+            <el-slider v-model="config.hold_days" :min="1" :max="10" :step="1" />
+            <span class="hint-text">每隔N天检查调仓，1=每天调仓</span>
+          </div>
+          <div class="param-slider">
+            <div class="slider-header">
+              <label class="config-label">止损比例 (%)</label>
+              <span class="slider-value">{{ config.stop_loss }}%</span>
+            </div>
+            <el-slider v-model="config.stop_loss" :min="0" :max="20" :step="1" />
+            <span class="hint-text">0=不止损，建议5-10%</span>
           </div>
         </div>
       </div>
@@ -141,6 +150,8 @@ const config = reactive({
   initial_account: 100,
   topk: 5,
   n_drop: 1,
+  hold_days: 3,
+  stop_loss: 5,
   strategy_type: 'TopkDropoutStrategy',
   recorder_id: ''
 })
@@ -324,6 +335,12 @@ const deleteAllRecorders = async () => {
   background: rgba(102, 126, 234, 0.1);
   padding: 4px 12px;
   border-radius: 6px;
+}
+
+.hint-text {
+  font-size: 11px;
+  color: #8a94a6;
+  margin-top: 2px;
 }
 
 .recorder-row {

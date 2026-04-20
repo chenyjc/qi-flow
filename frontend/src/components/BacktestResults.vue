@@ -66,6 +66,14 @@
           <span class="config-value">{{ config.n_drop }}</span>
         </div>
         <div class="config-item">
+          <span class="config-label">持仓周期</span>
+          <span class="config-value">{{ config.hold_days }}天</span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">止损比例</span>
+          <span class="config-value">{{ config.stop_loss }}%</span>
+        </div>
+        <div class="config-item">
           <span class="config-label">策略类型</span>
           <span class="config-value">{{ config.strategy_type }}</span>
         </div>
@@ -448,7 +456,11 @@ const loadResult = async () => {
     const res = await axios.get(`${API}/qlib/backtest_result/${selectedId.value}`)
     if (res.data.success) {
       metrics.value = res.data.key_metrics
-      config.value = res.data.config
+      config.value = {
+        hold_days: 3,
+        stop_loss: 5,
+        ...res.data.config
+      }
       cumulativeData.value = res.data.cumulative_data
       dailyData.value = res.data.daily_data
       positions.value = res.data.positions || []
