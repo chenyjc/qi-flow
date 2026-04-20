@@ -696,7 +696,34 @@ class QlibService:
             
             dataset = init_instance_by_config(dataset)
             
-            # 回测配置
+            # 回测配置 - 使用自定义策略
+            if strategy_type == "TopkDropoutStrategy":
+                # 使用增强版自定义策略
+                strategy_config = {
+                    "class": "EnhancedTopkDropoutStrategy",
+                    "module_path": "backend.strategy",
+                    "kwargs": {
+                        "model": model,
+                        "dataset": dataset,
+                        "topk": topk,
+                        "n_drop": n_drop,
+                        "hold_days": hold_days,
+                        "stop_loss": stop_loss / 100.0,  # 转换为小数
+                    },
+                }
+            else:
+                # 使用原始策略
+                strategy_config = {
+                    "class": strategy_type,
+                    "module_path": "qlib.contrib.strategy.signal_strategy",
+                    "kwargs": {
+                        "model": model,
+                        "dataset": dataset,
+                        "topk": topk,
+                        "n_drop": n_drop,
+                    },
+                }
+
             port_analysis_config = {
                 "executor": {
                     "class": "SimulatorExecutor",
@@ -706,18 +733,7 @@ class QlibService:
                         "generate_portfolio_metrics": True,
                     },
                 },
-                "strategy": {
-                    "class": strategy_type,
-                    "module_path": "qlib.contrib.strategy.signal_strategy",
-                    "kwargs": {
-                        "model": model,
-                        "dataset": dataset,
-                        "topk": topk,
-                        "n_drop": n_drop,
-                        "hold_days": hold_days,
-                        "stop_loss": stop_loss / 100.0,  # 转换为小数
-                    },
-                },
+                "strategy": strategy_config,
                 "backtest": {
                     "start_time": start_date,
                     "end_time": end_date,
