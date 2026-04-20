@@ -1,3 +1,40 @@
+"""
+Qlib 相关 API 路由
+
+API 端点清单:
+=============
+
+数据管理:
+  GET    /check_data_release      - 检查 Qlib 数据发布日期
+  GET    /download_data_stream      - 下载 Qlib 数据（SSE流式）
+  POST   /download_data            - 下载 Qlib 数据（非流式）[Deprecated]
+  POST   /update_stock_db          - 更新股票信息数据库
+  POST   /preview_data             - 预览数据
+
+模型训练:
+  POST   /train_stream             - 训练模型（SSE流式）
+  POST   /train                    - 训练模型（非流式）[Deprecated]
+
+回测:
+  POST   /backtest                 - 执行回测
+
+记录查询:
+  GET    /recorders                - 获取训练记录
+  GET    /train_result/{id}        - 获取训练结果（模型评估）
+  GET    /backtest_recorders       - 获取回测记录
+  GET    /backtest_result/{id}     - 获取回测结果
+
+删除操作:
+  DELETE /recorders/{id}           - 删除训练记录
+  DELETE /recorders                - 删除所有训练记录
+  DELETE /backtest_recorders/{id}  - 删除回测记录
+
+Deprecated API:
+===============
+- POST /download_data  -> 请使用 GET /download_data_stream
+- POST /train          -> 请使用 POST /train_stream
+"""
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -92,7 +129,11 @@ async def download_qlib_data_stream():
 
 @router.post("/download_data")
 async def download_qlib_data():
-    """下载 Qlib 数据"""
+    """下载 Qlib 数据 (Deprecated: 请使用 /download_data_stream)
+
+    .. deprecated::
+        该接口已被弃用，请使用 SSE 流式接口 /download_data_stream 代替
+    """
     try:
         result = qlib_service.download_data()
         return result
@@ -176,7 +217,11 @@ async def train_model_stream(request: TrainRequest):
 
 @router.post("/train")
 async def train_model(request: TrainRequest):
-    """训练模型"""
+    """训练模型 (Deprecated: 请使用 /train_stream)
+
+    .. deprecated::
+        该接口已被弃用，请使用 SSE 流式接口 /train_stream 代替以获得实时进度反馈
+    """
     try:
         result = qlib_service.train_model(
             market=request.market,

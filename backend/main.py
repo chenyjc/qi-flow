@@ -1,3 +1,18 @@
+"""
+QiFlow 量化交易策略系统
+
+基于 Qlib 和 FastAPI 的量化交易策略回测系统
+
+API 路由:
+=========
+/api/qlib/*  - Qlib相关接口 (主要接口)
+/api/stock/* - 股票数据接口 (Deprecated)
+
+文档:
+  - API文档: /docs (Swagger UI)
+  - 备用文档: /redoc (ReDoc)
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +43,8 @@ app.add_middleware(
 )
 
 # 注册路由
-app.include_router(stock.router, prefix="/api/stock", tags=["stock"])
+# stock 路由已被弃用，建议迁移到 qlib 路由
+app.include_router(stock.router, prefix="/api/stock", tags=["stock (Deprecated)"])
 app.include_router(qlib.router, prefix="/api/qlib", tags=["qlib"])
 
 # 配置静态文件服务
@@ -47,6 +63,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """健康检查接口"""
     return {"status": "healthy"}
 
 if __name__ == "__main__":
