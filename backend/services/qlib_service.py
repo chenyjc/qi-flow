@@ -490,6 +490,34 @@ class QlibService:
                 group_returns['long_average'] = long_avg.dropna().tolist()
                 group_returns['dates'] = pred_label_df.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
 
+                # 计算测试集收益（按组）
+                test_returns = {}
+                test_pred_label = pred_label_df[
+                    (pred_label_df.index.get_level_values('datetime') >= test_start_date) &
+                    (pred_label_df.index.get_level_values('datetime') <= test_end_date)
+                ].copy()
+
+                if len(test_pred_label) > 0:
+                    test_pred_label_sorted = test_pred_label.sort_values('score', ascending=False)
+
+                    for i in range(N):
+                        group_name = f"Group{i+1}"
+                        group_data = test_pred_label_sorted.groupby(level='datetime', group_keys=False).apply(
+                            lambda x: x.iloc[len(x)//N*i:len(x)//N*(i+1)]['label'].mean()
+                        )
+                        test_returns[group_name] = group_data.dropna().tolist()
+
+                    # 测试集多空收益
+                    test_long_short = pd.Series(test_returns['Group1']) - pd.Series(test_returns['Group5'])
+                    test_returns['long_short'] = test_long_short.dropna().tolist()
+                    test_returns['dates'] = test_pred_label.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
+                else:
+                    # 如果没有测试集数据，使用空数据
+                    for i in range(N):
+                        test_returns[f"Group{i+1}"] = []
+                    test_returns['long_short'] = []
+                    test_returns['dates'] = []
+
                 # 计算IC序列
                 ic_data = {
                     'dates': ic.index.strftime('%Y-%m-%d').tolist(),
@@ -501,6 +529,7 @@ class QlibService:
                 viz_data = {
                     'metrics': metrics,
                     'group_returns': group_returns,
+                    'test_returns': test_returns,
                     'ic_data': ic_data
                 }
                 R.save_objects(viz_data=viz_data)
@@ -1241,6 +1270,12 @@ class QlibService:
                         if key != 'dates':
                             viz_data['group_returns'][key] = safe_list(viz_data['group_returns'][key])
 
+                # 处理test_returns（测试集收益）
+                if 'test_returns' in viz_data:
+                    for key in viz_data['test_returns']:
+                        if key != 'dates':
+                            viz_data['test_returns'][key] = safe_list(viz_data['test_returns'][key])
+
                 # 处理ic_data
                 if 'ic_data' in viz_data:
                     if 'ic' in viz_data['ic_data']:
@@ -1254,6 +1289,7 @@ class QlibService:
                 "params": params,
                 "metrics": viz_data.get('metrics', {}) if viz_data else {},
                 "group_returns": viz_data.get('group_returns', {}) if viz_data else {},
+                "test_returns": viz_data.get('test_returns', {}) if viz_data else {},
                 "ic_data": viz_data.get('ic_data', {}) if viz_data else {}
             }
         except Exception as e:

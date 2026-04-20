@@ -144,15 +144,15 @@
       <div class="charts-section">
         <h3>可视化分析</h3>
         <div class="charts-grid">
-          <!-- 分组收益累计曲线 -->
+          <!-- 测试集分组收益累计曲线 -->
           <div class="chart-card">
             <div class="chart-header">
-              <h4>分组累计收益</h4>
-              <el-tooltip content="按预测分数分为5组，Group1为最高分，Group5为最低分">
+              <h4>测试集分组收益</h4>
+              <el-tooltip content="测试集上按预测分数分为5组，Group1为最高分，Group5为最低分">
                 <el-icon><QuestionFilled /></el-icon>
               </el-tooltip>
             </div>
-            <div ref="groupReturnChart" class="chart-container"></div>
+            <div ref="testReturnChart" class="chart-container"></div>
           </div>
 
           <!-- IC时间序列 -->
@@ -191,9 +191,9 @@
       </div>
 
       <!-- 详细数据表格 -->
-      <div class="detail-section" v-if="evaluationResult.group_returns">
-        <h3>分组收益详情</h3>
-        <el-table :data="groupReturnTableData" style="width: 100%" border>
+      <div class="detail-section" v-if="evaluationResult.test_returns">
+        <h3>测试集分组收益详情</h3>
+        <el-table :data="testReturnTableData" style="width: 100%" border>
           <el-table-column prop="group" label="分组" width="120" />
           <el-table-column prop="avg_return" label="平均日收益" width="150">
             <template #default="scope">
@@ -242,12 +242,12 @@ const loading = ref(false)
 const evaluationResult = ref(null)
 
 // 图表实例
-const groupReturnChart = ref(null)
+const testReturnChart = ref(null)
 const icChart = ref(null)
 const icDistChart = ref(null)
 const monthlyIcChart = ref(null)
 
-let groupChartInstance = null
+let testChartInstance = null
 let icChartInstance = null
 let icDistChartInstance = null
 let monthlyIcChartInstance = null
@@ -291,16 +291,16 @@ const getMetricClass = (value) => {
   return value >= 0 ? 'positive' : 'negative'
 }
 
-// 计算分组收益表格数据
-const groupReturnTableData = computed(() => {
-  if (!evaluationResult.value?.group_returns) return []
+// 计算测试集分组收益表格数据
+const testReturnTableData = computed(() => {
+  if (!evaluationResult.value?.test_returns) return []
 
-  const group_returns = evaluationResult.value.group_returns
+  const test_returns = evaluationResult.value.test_returns
   const data = []
 
   for (let i = 1; i <= 5; i++) {
     const groupKey = `Group${i}`
-    const returns = group_returns[groupKey] || []
+    const returns = test_returns[groupKey] || []
     const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0
     const cumReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) : 0
 
@@ -313,8 +313,8 @@ const groupReturnTableData = computed(() => {
   }
 
   // 添加多空收益
-  if (group_returns.long_short) {
-    const lsReturns = group_returns.long_short
+  if (test_returns.long_short) {
+    const lsReturns = test_returns.long_short
     const avgLsReturn = lsReturns.reduce((a, b) => a + b, 0) / lsReturns.length
     const cumLsReturn = lsReturns.reduce((a, b) => a + b, 0)
     data.push({
@@ -355,9 +355,9 @@ const onRecorderChange = () => {
 
 // 销毁图表实例
 const disposeCharts = () => {
-  if (groupChartInstance) {
-    groupChartInstance.dispose()
-    groupChartInstance = null
+  if (testChartInstance) {
+    testChartInstance.dispose()
+    testChartInstance = null
   }
   if (icChartInstance) {
     icChartInstance.dispose()
@@ -388,7 +388,7 @@ const loadEvaluation = async () => {
       console.log('evaluationResult set, group_returns:', response.data.group_returns)
       console.log('evaluationResult set, ic_data:', response.data.ic_data)
       await nextTick()
-      console.log('nextTick done, checking refs:', groupReturnChart.value)
+      console.log('nextTick done, checking refs:', testReturnChart.value)
       renderCharts()
     } else {
       console.error('获取评估结果失败:', response.data.message)
@@ -407,47 +407,47 @@ const renderCharts = () => {
   console.log('renderCharts called, evaluationResult:', evaluationResult.value)
 
   // 安全获取数据
-  const group_returns = evaluationResult.value.group_returns || {}
+  const test_returns = evaluationResult.value.test_returns || {}
   const ic_data = evaluationResult.value.ic_data || {}
 
-  console.log('group_returns:', group_returns)
+  console.log('test_returns:', test_returns)
   console.log('ic_data:', ic_data)
 
   // Debug: 检查DOM元素
-  console.log('groupReturnChart ref:', groupReturnChart.value)
+  console.log('testReturnChart ref:', testReturnChart.value)
   console.log('icChart ref:', icChart.value)
   console.log('icDistChart ref:', icDistChart.value)
   console.log('monthlyIcChart ref:', monthlyIcChart.value)
 
   // 使用 setTimeout 确保 DOM 完全渲染并获取正确尺寸
   setTimeout(() => {
-    renderGroupReturnChart(group_returns)
+    renderTestReturnChart(test_returns)
     renderIcChart(ic_data)
     renderIcDistChart(ic_data)
     renderMonthlyIcChart(ic_data)
   }, 100)
 }
 
-// 1. 渲染分组收益图
-const renderGroupReturnChart = (group_returns) => {
-  if (!groupReturnChart.value) return
+// 1. 渲染测试集收益图
+const renderTestReturnChart = (test_returns) => {
+  if (!testReturnChart.value) return
 
   // 先销毁旧实例
-  if (groupChartInstance) {
-    groupChartInstance.dispose()
-    groupChartInstance = null
+  if (testChartInstance) {
+    testChartInstance.dispose()
+    testChartInstance = null
   }
 
-  groupChartInstance = echarts.init(groupReturnChart.value)
+  testChartInstance = echarts.init(testReturnChart.value)
 
   const series = []
   const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6']
-  const dates = group_returns.dates || []
+  const dates = test_returns.dates || []
 
   // 各组收益曲线
   for (let i = 1; i <= 5; i++) {
     const groupKey = `Group${i}`
-    const groupData = group_returns[groupKey] || []
+    const groupData = test_returns[groupKey] || []
     if (groupData.length > 0 && dates.length === groupData.length) {
       const cumReturns = []
       let cum = 0
@@ -468,7 +468,7 @@ const renderGroupReturnChart = (group_returns) => {
   }
 
   // 多空收益曲线
-  const longShortData = group_returns.long_short || []
+  const longShortData = test_returns.long_short || []
   if (longShortData.length > 0 && dates.length === longShortData.length) {
     const cumLongShort = []
     let cum = 0
@@ -486,10 +486,10 @@ const renderGroupReturnChart = (group_returns) => {
     })
   }
 
-  console.log('Rendering group return chart, series count:', series.length)
+  console.log('Rendering test return chart, series count:', series.length)
 
   // 即使没有数据也显示空图表
-  groupChartInstance.setOption({
+  testChartInstance.setOption({
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
@@ -527,7 +527,7 @@ const renderGroupReturnChart = (group_returns) => {
   })
 
   // 强制调整图表尺寸
-  groupChartInstance.resize()
+  testChartInstance.resize()
 }
 
 // 2. 渲染IC时间序列图
@@ -769,7 +769,7 @@ onUnmounted(() => {
 
 // 窗口大小变化处理
 const handleResize = () => {
-  if (groupChartInstance) groupChartInstance.resize()
+  if (testChartInstance) testChartInstance.resize()
   if (icChartInstance) icChartInstance.resize()
   if (icDistChartInstance) icDistChartInstance.resize()
   if (monthlyIcChartInstance) monthlyIcChartInstance.resize()
