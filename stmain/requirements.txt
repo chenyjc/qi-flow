@@ -1,3 +1,6 @@
+# [Deprecated] 该文件已不再维护
+# 请使用 backend/requirements.txt
+
 pyqlib
 streamlit
 matplotlib

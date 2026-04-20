@@ -1,8 +1,14 @@
 #!/bin/bash
 
-# 启动脚本 - Streamlit 版本
+# [Deprecated] 该脚本已不再维护
+# 请使用 start_backend.sh 启动前后端合一的服务
+#
+# 原 Streamlit 版本已被弃用，新系统使用 FastAPI + Vue3 架构
+# 访问地址: http://localhost:8008
 
 echo "===== Streamlit 量化交易策略系统启动脚本 ====="
+echo ""
+echo "[警告] 该脚本已弃用，请使用 ./start_backend.sh 启动新系统"
 echo ""
 
 # 检查Python环境

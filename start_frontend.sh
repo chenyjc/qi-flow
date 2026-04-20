@@ -1,8 +1,17 @@
 #!/bin/bash
 
-# 前端启动脚本 - Vue 3 + Vite
+# [Deprecated] 该脚本已不再维护
+# 请使用 start_backend.sh 启动前后端合一的服务
+#
+# 原独立前端启动方式已被弃用，现在前后端已整合
+# 新系统使用 FastAPI 提供静态文件服务
+# 访问地址: http://localhost:8008
 
 echo "===== 前端启动脚本 ====="
+echo ""
+echo "[警告] 该脚本已弃用，请使用 ./start_backend.sh 启动新系统"
+echo ""
+echo "新系统访问地址: http://localhost:8008"
 echo ""
 
 # 检查 Node.js 环境

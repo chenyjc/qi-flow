@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+[Deprecated] 该模块已不再维护
+请使用 backend/services/qlib_service.py 中的相应功能
+
 股票信息数据库管理脚本
 用于初始化、更新和查询A股股票信息数据库
 """

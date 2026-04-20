@@ -1,4 +1,11 @@
-# Deprecated: This app is no longer maintained. 
+# [Deprecated] 该应用已不再维护
+# 请使用新的 FastAPI + Vue3 版本，位于 backend/ 和 frontend/ 目录
+#
+# 原 Streamlit 版本已弃用，新系统提供更完善的功能和更好的性能
+# 启动新系统请使用: ./start_backend.sh
+# 访问地址: http://localhost:8008
+#
+# Deprecated: This app is no longer maintained.
 # Please use the new version in backend and frontend folders.
 
 # A Streamlit App for Qlib Trainnng & Backtest

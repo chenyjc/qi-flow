@@ -1,3 +1,11 @@
+"""
+[Deprecated] 该服务已不再维护
+请使用 QlibService 中的相关功能
+
+股票数据服务模块
+提供股票数据获取、因子计算和回测功能
+"""
+
 import akshare as ak
 import pandas as pd
 import numpy as np
