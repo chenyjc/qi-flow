@@ -291,28 +291,32 @@ const initChart = () => {
         type: 'line',
         data: [],
         smooth: true,
-        lineStyle: { opacity: 0.5 }
+        symbol: 'none',
+        lineStyle: { opacity: 0.8, width: 1 }
       },
       {
         name: 'MA10',
         type: 'line',
         data: [],
         smooth: true,
-        lineStyle: { opacity: 0.5 }
+        symbol: 'none',
+        lineStyle: { opacity: 0.8, width: 1 }
       },
       {
         name: 'MA20',
         type: 'line',
         data: [],
         smooth: true,
-        lineStyle: { opacity: 0.5 }
+        symbol: 'none',
+        lineStyle: { opacity: 0.8, width: 1 }
       },
       {
         name: 'MA30',
         type: 'line',
         data: [],
         smooth: true,
-        lineStyle: { opacity: 0.5 }
+        symbol: 'none',
+        lineStyle: { opacity: 0.8, width: 1 }
       },
       {
         name: '成交量',
@@ -809,7 +813,7 @@ onUnmounted(() => {
 
 .chart-container {
   width: 100%;
-  height: 500px;
+  height: 650px;
 }
 
 /* 加载动画 */
@@ -850,7 +854,7 @@ onUnmounted(() => {
   }
 
   .chart-container {
-    height: 400px;
+    height: 450px;
   }
 }
 </style>
