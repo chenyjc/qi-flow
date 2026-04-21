@@ -44,10 +44,6 @@
       </div>
       <div class="stock-metrics">
         <div class="metric-item">
-          <span class="metric-label">日期</span>
-          <span class="metric-value">{{ currentDate }}</span>
-        </div>
-        <div class="metric-item">
           <span class="metric-label">今开</span>
           <span class="metric-value">{{ currentStock.open?.toFixed(2) }}</span>
         </div>
