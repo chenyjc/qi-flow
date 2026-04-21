@@ -18,7 +18,6 @@
         </el-button>
       </div>
       <div class="quick-tags">
-        <span class="tag-label">快速选择：</span>
         <el-tag
           v-for="stock in quickStocks"
           :key="stock.code"
@@ -70,22 +69,68 @@
       </div>
     </div>
 
-    <!-- K线图区域 -->
+    <!-- K 线图区域 -->
     <div class="chart-section">
-      <div class="chart-header">
-        <h3>K线图</h3>
-        <div class="time-range">
-          <el-radio-group v-model="timeRange" size="small" @change="loadStockData">
-            <el-radio-button label="1M">1月</el-radio-button>
-            <el-radio-button label="3M">3月</el-radio-button>
-            <el-radio-button label="6M">6月</el-radio-button>
-            <el-radio-button label="1Y">1年</el-radio-button>
-            <el-radio-button label="YTD">本年</el-radio-button>
-            <el-radio-button label="ALL">全部</el-radio-button>
-          </el-radio-group>
+      <!-- 时间周期选择 -->
+      <div class="time-period-selector">
+        <el-button-group>
+          <el-button size="small" :class="{ active: timePeriod === '3M' }" @click="setTimePeriod('3M')">3 个月</el-button>
+          <el-button size="small" :class="{ active: timePeriod === '6M' }" @click="setTimePeriod('6M')">半年</el-button>
+          <el-button size="small" :class="{ active: timePeriod === '1Y' }" @click="setTimePeriod('1Y')">1 年</el-button>
+          <el-button size="small" :class="{ active: timePeriod === '3Y' }" @click="setTimePeriod('3Y')">3 年</el-button>
+        </el-button-group>
+      </div>
+      
+      <!-- 技术指标显示 -->
+      <div class="technical-indicators" v-if="currentStock.code">
+        <span class="indicator-item" style="color: #f0c040">MA5: {{ maValues.ma5?.toFixed(2) }}</span>
+        <span class="indicator-item" style="color: #409eff">MA10: {{ maValues.ma10?.toFixed(2) }}</span>
+        <span class="indicator-item" style="color: #67c23a">MA20: {{ maValues.ma20?.toFixed(2) }}</span>
+        <span class="indicator-item" style="color: #9c27b0">MA30: {{ maValues.ma30?.toFixed(2) }}</span>
+        <span class="indicator-item" style="color: #ff9800">MA60: {{ maValues.ma60?.toFixed(2) }}</span>
+        <span class="indicator-item" style="color: #795548">MA120: {{ maValues.ma120?.toFixed(2) }}</span>
+      </div>
+      
+      <div ref="chartContainer" class="chart-container"></div>
+      
+      <!-- 十字线数据悬浮窗 -->
+      <div class="crosshair-tooltip" v-if="tooltipVisible" :style="tooltipStyle">
+        <div class="tooltip-header">
+          <span class="tooltip-date">{{ crosshairData.time }}</span>
+        </div>
+        <div class="tooltip-body">
+          <div class="tooltip-row">
+            <span class="tooltip-label">开盘</span>
+            <span class="tooltip-value">{{ crosshairData.open?.toFixed(2) }}</span>
+          </div>
+          <div class="tooltip-row">
+            <span class="tooltip-label">最高</span>
+            <span class="tooltip-value high">{{ crosshairData.high?.toFixed(2) }}</span>
+          </div>
+          <div class="tooltip-row">
+            <span class="tooltip-label">最低</span>
+            <span class="tooltip-value low">{{ crosshairData.low?.toFixed(2) }}</span>
+          </div>
+          <div class="tooltip-row">
+            <span class="tooltip-label">收盘</span>
+            <span class="tooltip-value">{{ crosshairData.close?.toFixed(2) }}</span>
+          </div>
+          <div class="tooltip-row">
+            <span class="tooltip-label">涨跌</span>
+            <span :class="['tooltip-value', crosshairData.change >= 0 ? 'up' : 'down']">
+              {{ crosshairData.change?.toFixed(2) }} / {{ crosshairData.changePercent?.toFixed(2) }}%
+            </span>
+          </div>
         </div>
       </div>
-      <div ref="chartContainer" class="chart-container"></div>
+      
+      <!-- 成交量指标 -->
+      <div class="volume-indicators" v-if="currentStock.code">
+        <span class="indicator-item">VOL: {{ formatVolume(currentStock.volume) }}</span>
+        <span class="indicator-item" style="color: #f0c040">VOLMA5: {{ formatVolume(volumeMaValues.ma5) }}</span>
+        <span class="indicator-item" style="color: #409eff">VOLMA10: {{ formatVolume(volumeMaValues.ma10) }}</span>
+        <span class="indicator-item" style="color: #67c23a">VOLMA20: {{ formatVolume(volumeMaValues.ma20) }}</span>
+      </div>
     </div>
 
     <!-- 加载状态 -->
@@ -97,8 +142,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
-import * as echarts from 'echarts'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts'
 import axios from 'axios'
 
 const API_BASE_URL = '/api'
@@ -118,11 +163,59 @@ const currentStock = ref({
   amount: 0
 })
 const loading = ref(false)
-const timeRange = ref('3M')
+const isLoadingMore = ref(false) // 是否正在加载更多数据
+const timePeriod = ref('3M') // 默认 3 个月
 const chartContainer = ref(null)
-let chartInstance = null
+let chart = null
+let candlestickSeries = null
+let volumeSeries = null
+let ma5Series = null
+let ma10Series = null
+let ma20Series = null
+let ma30Series = null
+let ma60Series = null
+let ma120Series = null
+let volumeMa5Series = null
+let volumeMa10Series = null
+let volumeMa20Series = null
 
-// 常用股票 - 2026年热门股票
+// 技术指标值
+const maValues = ref({
+  ma5: 0,
+  ma10: 0,
+  ma20: 0,
+  ma30: 0,
+  ma60: 0,
+  ma120: 0
+})
+
+// 成交量均线值
+const volumeMaValues = ref({
+  ma5: 0,
+  ma10: 0,
+  ma20: 0
+})
+
+// 十字线数据
+const crosshairData = ref({
+  time: '',
+  open: 0,
+  high: 0,
+  low: 0,
+  close: 0,
+  change: 0,
+  changePercent: 0
+})
+
+// 悬浮窗状态
+const tooltipVisible = ref(false)
+const tooltipStyle = ref({
+  left: '0px',
+  top: '0px'
+})
+const tooltipRef = ref(null)
+
+// 2026 年热门股票
 const quickStocks = [
   { code: '002594.SZ', name: '比亚迪' },
   { code: '300750.SZ', name: '宁德时代' },
@@ -158,221 +251,354 @@ const formatAmount = (amt) => {
   return amt.toString()
 }
 
-// 初始化图表
+// 格式化时间标签
+const formatTimeLabel = (time) => {
+  if (!time) return ''
+  // Lightweight Charts 的时间可能是 timestamp 或字符串
+  if (typeof time === 'number') {
+    const date = new Date(time * 1000)
+    return date.toISOString().split('T')[0]
+  }
+  return time
+}
+
+// 获取前收盘价（从已加载的数据中查找）
+let cachedStockData = []
+const getPreClose = (time) => {
+  const currentTime = formatTimeLabel(time)
+  const currentIndex = cachedStockData.findIndex(item => item.date === currentTime)
+  if (currentIndex > 0) {
+    return cachedStockData[currentIndex - 1].close
+  }
+  return null
+}
+
+// 初始化图表 - 使用 Lightweight Charts v5 最新 API
 const initChart = () => {
   if (!chartContainer.value) return
 
-  chartInstance = echarts.init(chartContainer.value)
-
-  const option = {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'cross'
-      },
-      formatter: function (params) {
-        const data = params[0]
-        if (!data) return ''
-        const date = data.name
-        const values = data.data
-        const open = values[1]
-        const close = values[2]
-        const low = values[3]
-        const high = values[4]
-        const volume = values[5]
-        const change = ((close - open) / open * 100)
-        const changeClass = change >= 0 ? 'up' : 'down'
-        const changeColor = change >= 0 ? '#ef232a' : '#14b143'
-        const changeSign = change >= 0 ? '+' : ''
-        return `
-          <div style="font-weight:bold;margin-bottom:5px">${date}</div>
-          <div>开盘: ${open.toFixed(2)}</div>
-          <div>收盘: ${close.toFixed(2)}</div>
-          <div>最低: ${low.toFixed(2)}</div>
-          <div>最高: ${high.toFixed(2)}</div>
-          <div style="color:${changeColor};font-weight:bold">涨跌幅: ${changeSign}${change.toFixed(2)}%</div>
-          <div>成交量: ${(volume / 10000).toFixed(2)}万</div>
-        `
-      }
+  // 创建图表实例
+  chart = createChart(chartContainer.value, {
+    layout: {
+      background: { type: 'solid', color: '#ffffff' },
+      textColor: '#333',
     },
-    legend: {
-      data: ['日K', 'MA5', 'MA10', 'MA20', 'MA30'],
-      top: 10
+    grid: {
+      vertLines: { color: '#f0f0f0' },
+      horzLines: { color: '#f0f0f0' },
     },
-    grid: [
-      {
-        left: '10%',
-        right: '8%',
-        height: '50%'
+    crosshair: {
+      mode: 1,
+      vertLine: {
+        color: '#667eea',
+        labelBackgroundColor: '#667eea',
       },
-      {
-        left: '10%',
-        right: '8%',
-        top: '68%',
-        height: '16%'
-      }
-    ],
-    xAxis: [
-      {
-        type: 'category',
-        data: [],
-        scale: true,
-        boundaryGap: false,
-        axisLine: { onZero: false },
-        splitLine: { show: false },
-        min: 'dataMin',
-        max: 'dataMax'
+      horzLine: {
+        color: '#667eea',
+        labelBackgroundColor: '#667eea',
       },
-      {
-        type: 'category',
-        gridIndex: 1,
-        data: [],
-        scale: true,
-        boundaryGap: false,
-        axisLine: { onZero: false },
-        axisTick: { show: false },
-        splitLine: { show: false },
-        axisLabel: { show: false },
-        min: 'dataMin',
-        max: 'dataMax'
-      }
-    ],
-    yAxis: [
-      {
-        scale: true,
-        splitArea: {
-          show: true
-        }
+    },
+    rightPriceScale: {
+      borderColor: '#e0e0e0',
+    },
+    timeScale: {
+      borderColor: '#e0e0e0',
+      timeVisible: true,
+      secondsVisible: false,
+      fixLeftEdge: false,
+      fixRightEdge: false,
+      lockVisibleTimeRangeOnResize: false,
+      rightBarStaysOnScroll: true,
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
       },
-      {
-        scale: true,
-        gridIndex: 1,
-        splitNumber: 2,
-        axisLabel: { show: false },
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { show: false }
-      }
-    ],
-    dataZoom: [
-      {
-        type: 'inside',
-        xAxisIndex: [0, 1],
-        start: 50,
-        end: 100
+      handleScale: {
+        axisPressedMouseMove: {
+          time: false,
+          price: true,
+        },
+        axisDoubleClickReset: {
+          time: true,
+          price: true,
+        },
+        mouseWheel: true,
+        pinch: true,
       },
-      {
-        show: true,
-        xAxisIndex: [0, 1],
-        type: 'slider',
-        top: '85%',
-        start: 50,
-        end: 100
-      }
-    ],
-    series: [
-      {
-        name: '日K',
-        type: 'candlestick',
-        data: [],
-        itemStyle: {
-          color: '#ef232a',
-          color0: '#14b143',
-          borderColor: '#ef232a',
-          borderColor0: '#14b143'
-        }
+    },
+    crosshair: {
+      mode: 1,
+      vertLine: {
+        color: '#667eea',
+        labelBackgroundColor: '#667eea',
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 6,
       },
-      {
-        name: 'MA5',
-        type: 'line',
-        data: [],
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { opacity: 0.8, width: 1 }
+      horzLine: {
+        color: '#667eea',
+        labelBackgroundColor: '#667eea',
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 6,
       },
-      {
-        name: 'MA10',
-        type: 'line',
-        data: [],
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { opacity: 0.8, width: 1 }
-      },
-      {
-        name: 'MA20',
-        type: 'line',
-        data: [],
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { opacity: 0.8, width: 1 }
-      },
-      {
-        name: 'MA30',
-        type: 'line',
-        data: [],
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { opacity: 0.8, width: 1 }
-      },
-      {
-        name: '成交量',
-        type: 'bar',
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        data: [],
-        itemStyle: {
-          color: (params) => {
-            const data = params.data
-            return data[2] > data[1] ? '#ef232a' : '#14b143'
-          }
-        }
-      }
-    ]
-  }
+    },
+  })
 
-  chartInstance.setOption(option)
+  // 添加 K 线系列到第一个面板（paneIndex: 0）
+  candlestickSeries = chart.addSeries(CandlestickSeries, {
+    upColor: '#ef232a',
+    downColor: '#14b143',
+    borderUpColor: '#ef232a',
+    borderDownColor: '#14b143',
+    wickUpColor: '#ef232a',
+    wickDownColor: '#14b143',
+  }, 0)
+
+  // 自定义 K 线 tooltip 显示
+  candlestickSeries.priceLineSource = 1 // 使用最新数据
+
+  // 添加均线到第一个面板（不显示 title，避免在右侧坐标轴显示）
+  ma5Series = chart.addSeries(LineSeries, {
+    color: '#f0c040',
+    lineWidth: 1,
+  }, 0)
+  
+  ma10Series = chart.addSeries(LineSeries, {
+    color: '#409eff',
+    lineWidth: 1,
+  }, 0)
+  
+  ma20Series = chart.addSeries(LineSeries, {
+    color: '#67c23a',
+    lineWidth: 1,
+  }, 0)
+  
+  ma30Series = chart.addSeries(LineSeries, {
+    color: '#9c27b0',
+    lineWidth: 1,
+  }, 0)
+  
+  ma60Series = chart.addSeries(LineSeries, {
+    color: '#ff9800',
+    lineWidth: 1,
+  }, 0)
+  
+  ma120Series = chart.addSeries(LineSeries, {
+    color: '#795548',
+    lineWidth: 1,
+  }, 0)
+
+  // 添加成交量系列到第二个面板（paneIndex: 1）
+  volumeSeries = chart.addSeries(HistogramSeries, {
+    color: '#26a69a',
+    priceFormat: {
+      type: 'volume',
+    },
+  }, 1)
+
+  // 添加成交量均线到第二个面板（不显示 title）
+  volumeMa5Series = chart.addSeries(LineSeries, {
+    color: '#f0c040',
+    lineWidth: 1,
+  }, 1)
+  
+  volumeMa10Series = chart.addSeries(LineSeries, {
+    color: '#409eff',
+    lineWidth: 1,
+  }, 1)
+  
+  volumeMa20Series = chart.addSeries(LineSeries, {
+    color: '#67c23a',
+    lineWidth: 1,
+  }, 1)
 
   // 响应窗口大小变化
-  window.addEventListener('resize', handleResize)
+  const resizeObserver = new ResizeObserver(entries => {
+    if (entries.length === 0 || entries[0].contentRect.width === 0) return
+    const { width, height } = entries[0].contentRect
+    chart.applyOptions({ width, height })
+  })
+  resizeObserver.observe(chartContainer.value)
+
+  // 监听十字线移动，显示详细数据
+  chart.subscribeCrosshairMove(param => {
+    if (!param.time || !param.point) {
+      // 隐藏悬浮窗
+      tooltipVisible.value = false
+      return
+    }
+
+    // 获取当前时间点的 K 线数据
+    const data = param.seriesData.get(candlestickSeries)
+    if (data) {
+      const open = data.open
+      const high = data.high
+      const low = data.low
+      const close = data.close
+      
+      // 计算涨跌幅（需要获取前一天的收盘价）
+      const preClose = getPreClose(data.time) || open
+      const change = close - preClose
+      const changePercent = (change / preClose) * 100
+      
+      // 更新时间轴标签格式
+      const timeStr = formatTimeLabel(data.time)
+      
+      // 更新状态栏数据
+      crosshairData.value = {
+        time: timeStr,
+        open,
+        high,
+        low,
+        close,
+        change,
+        changePercent
+      }
+      
+      // 计算悬浮窗位置
+      const chartRect = chartContainer.value.getBoundingClientRect()
+      const tooltipWidth = 180
+      const tooltipHeight = 160
+      
+      // 获取图表在视口中的位置
+      const chartX = chartRect.left
+      const chartY = chartRect.top
+      
+      // 计算鼠标在图表内的相对位置
+      const mouseX = param.point.x
+      const mouseY = param.point.y
+      
+      // 默认显示在十字线右侧
+      let left = mouseX + 15
+      let top = mouseY - tooltipHeight / 2
+      
+      // 如果超出右边界，显示在左侧
+      if (left + tooltipWidth > chartRect.width) {
+        left = mouseX - tooltipWidth - 15
+      }
+      
+      // 如果超出上边界
+      if (top < 0) {
+        top = 10
+      }
+      
+      // 如果超出下边界
+      if (top + tooltipHeight > chartRect.height) {
+        top = chartRect.height - tooltipHeight - 10
+      }
+      
+      tooltipStyle.value = {
+        position: 'fixed',
+        left: `${chartX + left}px`,
+        top: `${chartY + top}px`,
+        zIndex: 9999
+      }
+      
+      // 显示悬浮窗
+      tooltipVisible.value = true
+    }
+  })
+
+  // 监听可见范围变化，实现动态加载
+  let visibleRangeTimeout = null
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+    // 防抖处理，避免频繁触发
+    if (visibleRangeTimeout) {
+      clearTimeout(visibleRangeTimeout)
+    }
+    visibleRangeTimeout = setTimeout(() => {
+      handleVisibleRangeChange()
+    }, 300)
+  })
 }
 
-// 处理窗口大小变化
-const handleResize = () => {
-  if (chartInstance) {
-    chartInstance.resize()
+// 处理可见范围变化（缩放/滚动时触发）
+let loadMoreTimeout = null
+let lastVisibleFrom = null
+const handleVisibleRangeChange = () => {
+  const visibleRange = chart.timeScale().getVisibleLogicalRange()
+  if (!visibleRange) return
+
+  // 计算当前可见的 K 线数量
+  const visibleBarsCount = Math.round(visibleRange.to - visibleRange.from)
+  
+  // 记录当前可见范围起始位置
+  lastVisibleFrom = visibleRange.from
+  
+  // 根据可见的 K 线数量判断缩放状态
+  if (visibleBarsCount < 20) {
+    console.log('放大：当前可见', visibleBarsCount, '根 K 线')
+  } else if (visibleBarsCount > 100) {
+    console.log('缩小：当前可见', visibleBarsCount, '根 K 线')
   }
+  
+  // 自动加载功能已禁用，如需启用请确保有严格的触发条件
 }
 
-// 计算移动平均线
-const calculateMA = (dayCount, data) => {
+// 计算移动平均线（用于价格数据）
+const calculatePriceMA = (dayCount, data) => {
   const result = []
   for (let i = 0; i < data.length; i++) {
     if (i < dayCount - 1) {
-      result.push('-')
       continue
     }
     let sum = 0
     for (let j = 0; j < dayCount; j++) {
-      sum += parseFloat(data[i - j][1])
+      sum += data[i - j].close
     }
-    result.push((sum / dayCount).toFixed(2))
+    result.push({
+      time: data[i].time,
+      value: sum / dayCount
+    })
+  }
+  return result
+}
+
+// 计算成交量移动平均线
+const calculateVolumeMA = (dayCount, data) => {
+  const result = []
+  for (let i = 0; i < data.length; i++) {
+    if (i < dayCount - 1) {
+      continue
+    }
+    let sum = 0
+    for (let j = 0; j < dayCount; j++) {
+      sum += data[i - j].value
+    }
+    result.push({
+      time: data[i].time,
+      value: sum / dayCount
+    })
   }
   return result
 }
 
 // 加载股票数据
-const loadStockData = async () => {
+const loadStockData = async (loadMore = false, endDate = null) => {
   if (!currentStock.value.code) return
 
   loading.value = true
   try {
+    // 转换股票代码格式：从 002594.SZ 转为 SZ002594
+    const formatStockCode = (code) => {
+      const parts = code.split('.')
+      if (parts.length === 2) {
+        const exchange = parts[1].toUpperCase()
+        const stockCode = parts[0]
+        return `${exchange}${stockCode}`
+      }
+      return code
+    }
+    
+    const formattedCode = formatStockCode(currentStock.value.code)
+    
     // 计算日期范围
-    const endDate = new Date()
-    const startDate = new Date()
-    switch (timeRange.value) {
-      case '1M':
-        startDate.setMonth(startDate.getMonth() - 1)
-        break
+    const defaultEndDate = new Date()
+    let startDate = new Date()
+    let requestEndDate = endDate || defaultEndDate
+    
+    switch (timePeriod.value) {
       case '3M':
         startDate.setMonth(startDate.getMonth() - 3)
         break
@@ -382,34 +608,44 @@ const loadStockData = async () => {
       case '1Y':
         startDate.setFullYear(startDate.getFullYear() - 1)
         break
-      case 'YTD':
-        startDate.setMonth(0, 1)
-        break
-      case 'ALL':
-        startDate.setFullYear(2020, 0, 1)
+      case '3Y':
+        startDate.setFullYear(startDate.getFullYear() - 3)
         break
     }
+    
+    // 如果是加载更多数据，设置更早的结束日期
+    if (loadMore && endDate) {
+      const endDateObj = new Date(endDate)
+      endDateObj.setDate(endDateObj.getDate() - 1) // 从当前数据的最后一天往前
+      requestEndDate = endDateObj
+      // 计算新的开始日期（加载更多天的数据）
+      startDate = new Date(requestEndDate)
+      startDate.setDate(startDate.getDate() - 60) // 每次加载 60 天
+    }
 
-    // 调用后端API获取数据
+    // 调用后端 API 获取数据
     const res = await axios.get(`${API_BASE_URL}/qlib/stock/quote`, {
       params: {
-        code: currentStock.value.code,
+        code: formattedCode,
         start_date: startDate.toISOString().split('T')[0],
-        end_date: endDate.toISOString().split('T')[0]
+        end_date: requestEndDate.toISOString().split('T')[0]
       }
     })
 
-    if (res.data.success) {
+    if (res.data.success && res.data.data && res.data.data.length > 0) {
       const data = res.data.data
       updateStockInfo(data)
-      updateChart(data)
+      updateChart(data, loadMore)
     } else {
-      // 使用模拟数据演示
-      useMockData()
+      console.warn('未获取到股票数据，请检查：1. 后端服务是否启动 2. Qlib 数据是否已下载 3. 股票代码格式是否正确')
+      // 不显示数据时清空图表
+      clearChart()
     }
   } catch (e) {
     console.error('加载股票数据失败:', e)
-    useMockData()
+    console.error('请确保：1. 后端服务已启动 (python backend/main.py) 2. Qlib 数据已下载')
+    // 加载失败时清空图表
+    clearChart()
   } finally {
     loading.value = false
   }
@@ -434,114 +670,120 @@ const updateStockInfo = (data) => {
 }
 
 // 更新图表
-const updateChart = (data) => {
-  if (!chartInstance || !data || data.length === 0) return
+const updateChart = (data, loadMore = false) => {
+  if (!candlestickSeries || !data || data.length === 0) return
 
-  const dates = data.map(item => item.date)
-  const candleData = data.map(item => [item.open, item.close, item.low, item.high, item.volume])
-  const volumeData = data.map((item, index) => {
-    const prevClose = index > 0 ? data[index - 1].close : item.open
-    return [item.date, item.volume, item.close, prevClose]
-  })
+  // 缓存股票数据用于计算涨跌幅
+  if (!loadMore) {
+    cachedStockData = data
+  } else {
+    // 加载更多时，将新数据添加到缓存前面
+    cachedStockData = [...data, ...cachedStockData]
+  }
 
-  const closes = data.map(item => item.close)
+  // 转换为 lightweight-charts 格式
+  const candleData = cachedStockData.map(item => ({
+    time: item.date,
+    open: item.open,
+    high: item.high,
+    low: item.low,
+    close: item.close
+  }))
 
-  chartInstance.setOption({
-    xAxis: [
-      { data: dates },
-      { data: dates }
-    ],
-    series: [
-      {
-        name: '日K',
-        data: candleData
-      },
-      {
-        name: 'MA5',
-        data: calculateMA(5, candleData),
-        type: 'line',
-        smooth: true,
-        lineStyle: { opacity: 0.5, color: '#f0c040' }
-      },
-      {
-        name: 'MA10',
-        data: calculateMA(10, candleData),
-        type: 'line',
-        smooth: true,
-        lineStyle: { opacity: 0.5, color: '#409eff' }
-      },
-      {
-        name: 'MA20',
-        data: calculateMA(20, candleData),
-        type: 'line',
-        smooth: true,
-        lineStyle: { opacity: 0.5, color: '#67c23a' }
-      },
-      {
-        name: 'MA30',
-        data: calculateMA(30, candleData),
-        type: 'line',
-        smooth: true,
-        lineStyle: { opacity: 0.5, color: '#e6a23c' }
-      },
-      {
-        name: '成交量',
-        data: volumeData,
-        type: 'bar',
-        xAxisIndex: 1,
-        yAxisIndex: 1
-      }
-    ]
-  })
+  // 成交量数据
+  const volumeData = cachedStockData.map(item => ({
+    time: item.date,
+    value: item.volume,
+    color: item.close >= item.open ? '#ef232a' : '#14b143'
+  }))
+
+  // 使用 setData 更新所有数据
+  candlestickSeries.setData(candleData)
+  volumeSeries.setData(volumeData)
+
+  // 计算并设置均线
+  const ma5Data = calculatePriceMA(5, candleData)
+  const ma10Data = calculatePriceMA(10, candleData)
+  const ma20Data = calculatePriceMA(20, candleData)
+  const ma30Data = calculatePriceMA(30, candleData)
+  const ma60Data = calculatePriceMA(60, candleData)
+  const ma120Data = calculatePriceMA(120, candleData)
+
+  ma5Series.setData(ma5Data)
+  ma10Series.setData(ma10Data)
+  ma20Series.setData(ma20Data)
+  ma30Series.setData(ma30Data)
+  ma60Series.setData(ma60Data)
+  ma120Series.setData(ma120Data)
+
+  // 计算并设置成交量均线
+  const volumeMa5Data = calculateVolumeMA(5, volumeData)
+  const volumeMa10Data = calculateVolumeMA(10, volumeData)
+  const volumeMa20Data = calculateVolumeMA(20, volumeData)
+
+  volumeMa5Series.setData(volumeMa5Data)
+  volumeMa10Series.setData(volumeMa10Data)
+  volumeMa20Series.setData(volumeMa20Data)
+
+  // 更新技术指标值
+  updateMaValues(candleData)
+  updateVolumeMaValues(volumeData)
+
+  // 自适应可见范围
+  chart.timeScale().fitContent()
 }
 
-// 使用模拟数据
-const useMockData = () => {
-  const dates = []
-  const data = []
-  const basePrice = 10 + Math.random() * 50
+// 更新技术指标值
+const updateMaValues = (data) => {
+  if (data.length === 0) return
+  
+  maValues.value.ma5 = calculateLatestMA(5, data)
+  maValues.value.ma10 = calculateLatestMA(10, data)
+  maValues.value.ma20 = calculateLatestMA(20, data)
+  maValues.value.ma30 = calculateLatestMA(30, data)
+  maValues.value.ma60 = calculateLatestMA(60, data)
+  maValues.value.ma120 = calculateLatestMA(120, data)
+}
 
-  for (let i = 60; i >= 0; i--) {
-    const date = new Date()
-    date.setDate(date.getDate() - i)
-    dates.push(date.toISOString().split('T')[0])
+// 更新成交量均线值
+const updateVolumeMaValues = (data) => {
+  if (data.length === 0) return
+  
+  volumeMaValues.value.ma5 = calculateLatestMA(5, data)
+  volumeMaValues.value.ma10 = calculateLatestMA(10, data)
+  volumeMaValues.value.ma20 = calculateLatestMA(20, data)
+}
 
-    const open = basePrice + (Math.random() - 0.5) * 2
-    const close = open + (Math.random() - 0.5) * 1.5
-    const low = Math.min(open, close) - Math.random() * 0.5
-    const high = Math.max(open, close) + Math.random() * 0.5
-    const volume = Math.floor(Math.random() * 1000000) + 500000
-    const preClose = open
-
-    data.push({
-      date: dates[dates.length - 1],
-      open: parseFloat(open.toFixed(2)),
-      close: parseFloat(close.toFixed(2)),
-      low: parseFloat(low.toFixed(2)),
-      high: parseFloat(high.toFixed(2)),
-      volume: volume,
-      amount: volume * close,
-      pre_close: preClose
-    })
+// 计算最新的移动平均值
+const calculateLatestMA = (dayCount, data) => {
+  if (data.length < dayCount) return 0
+  
+  let sum = 0
+  for (let i = 0; i < dayCount; i++) {
+    sum += data[data.length - 1 - i].close || data[data.length - 1 - i].value
   }
+  return sum / dayCount
+}
 
-  // 更新最新价格
-  if (data.length > 0) {
-    const latest = data[data.length - 1]
-    currentStock.value = {
-      ...currentStock.value,
-      price: latest.close,
-      change: ((latest.close - data[data.length - 2]?.open || latest.open) / (data[data.length - 2]?.open || latest.open) * 100),
-      open: latest.open,
-      high: latest.high,
-      low: latest.low,
-      preClose: data[data.length - 2]?.close || latest.open,
-      volume: latest.volume,
-      amount: latest.amount
-    }
-  }
+// 清空图表
+const clearChart = () => {
+  if (candlestickSeries) candlestickSeries.setData([])
+  if (volumeSeries) volumeSeries.setData([])
+  if (ma5Series) ma5Series.setData([])
+  if (ma10Series) ma10Series.setData([])
+  if (ma20Series) ma20Series.setData([])
+  if (ma30Series) ma30Series.setData([])
+  if (ma60Series) ma60Series.setData([])
+  if (ma120Series) ma120Series.setData([])
+  if (volumeMa5Series) volumeMa5Series.setData([])
+  if (volumeMa10Series) volumeMa10Series.setData([])
+  if (volumeMa20Series) volumeMa20Series.setData([])
+}
 
-  updateChart(data)
+// 设置时间周期
+const setTimePeriod = (period) => {
+  timePeriod.value = period
+  loadStockData()
 }
 
 // 搜索股票
@@ -552,7 +794,6 @@ const searchStock = () => {
   currentStock.value.code = code
   currentStock.value.name = code
 
-  // 从快速选择中查找名称
   const found = quickStocks.find(s => s.code === code)
   if (found) {
     currentStock.value.name = found.name
@@ -579,21 +820,18 @@ const handleStockSelect = (event) => {
 onMounted(() => {
   nextTick(() => {
     initChart()
-    // 默认显示第一个股票
     if (quickStocks.length > 0) {
       selectStock(quickStocks[0].code)
     }
   })
-  // 监听全局股票选择事件
   window.addEventListener('select-stock', handleStockSelect)
 })
 
 onUnmounted(() => {
-  if (chartInstance) {
-    chartInstance.dispose()
-    chartInstance = null
+  if (chart) {
+    chart.remove()
+    chart = null
   }
-  window.removeEventListener('resize', handleResize)
   window.removeEventListener('select-stock', handleStockSelect)
 })
 </script>
@@ -605,7 +843,6 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-/* 搜索区域 */
 .search-section {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 16px;
@@ -683,7 +920,6 @@ onUnmounted(() => {
   transform: translateY(-1px);
 }
 
-/* 股票信息卡片 */
 .stock-info-card {
   background: white;
   border-radius: 16px;
@@ -785,7 +1021,6 @@ onUnmounted(() => {
   color: #14b143;
 }
 
-/* 图表区域 */
 .chart-section {
   background: white;
   border-radius: 16px;
@@ -793,26 +1028,139 @@ onUnmounted(() => {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 
-.chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+.time-period-selector {
+  margin-bottom: 16px;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: 8px;
 }
 
-.chart-header h3 {
-  font-size: 18px;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0;
+.time-period-selector .el-button-group {
+  display: inline-flex;
+}
+
+.time-period-selector .el-button {
+  border-radius: 0;
+  border-right: 1px solid #e0e0e0;
+}
+
+.time-period-selector .el-button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.time-period-selector .el-button:last-child {
+  border-radius: 0 4px 4px 0;
+  border-right: none;
+}
+
+.time-period-selector .el-button.active {
+  background-color: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.technical-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.indicator-item {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.volume-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  font-size: 12px;
 }
 
 .chart-container {
   width: 100%;
   height: 650px;
+  position: relative;
 }
 
-/* 加载动画 */
+/* 十字线悬浮窗 */
+.crosshair-tooltip {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 180px;
+  pointer-events: none;
+  font-size: 12px;
+  transition: opacity 0.2s ease;
+}
+
+.tooltip-header {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.tooltip-date {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.tooltip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tooltip-label {
+  color: #8a94a6;
+  font-weight: 500;
+}
+
+.tooltip-value {
+  font-weight: 600;
+  color: #2c3e50;
+  text-align: right;
+}
+
+.tooltip-value.high {
+  color: #ef232a;
+}
+
+.tooltip-value.low {
+  color: #14b143;
+}
+
+.tooltip-value.up {
+  color: #ef232a;
+}
+
+.tooltip-value.down {
+  color: #14b143;
+}
+
 .loading-overlay {
   position: fixed;
   top: 0;
@@ -843,7 +1191,6 @@ onUnmounted(() => {
   }
 }
 
-/* 响应式 */
 @media (max-width: 768px) {
   .stock-metrics {
     grid-template-columns: repeat(3, 1fr);

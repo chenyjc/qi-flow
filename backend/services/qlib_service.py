@@ -1435,9 +1435,28 @@ class QlibService:
 
             # 转换为前端需要的格式
             result = []
-            for date, row in df.iterrows():
+            
+            # Qlib 返回的 DataFrame 索引是 MultiIndex: (datetime, instrument)
+            # 需要重置索引以便正确获取日期
+            df_reset = df.reset_index()
+            
+            # 获取列名
+            date_col = 'datetime' if 'datetime' in df_reset.columns else 'date'
+            
+            for _, row in df_reset.iterrows():
+                # 获取日期
+                date_val = row.get(date_col)
+                
+                # 确保 date 是 datetime.date 或 datetime.datetime 对象
+                if hasattr(date_val, 'strftime'):
+                    date_str = date_val.strftime('%Y-%m-%d')
+                elif isinstance(date_val, str):
+                    date_str = date_val
+                else:
+                    date_str = str(date_val)
+                    
                 result.append({
-                    "date": date.strftime('%Y-%m-%d'),
+                    "date": date_str,
                     "open": float(row['$open']),
                     "close": float(row['$close']),
                     "high": float(row['$high']),

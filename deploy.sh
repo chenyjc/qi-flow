@@ -18,13 +18,18 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-if ! command -v python3 &> /dev/null; then
-    echo "错误: 未找到 Python3，请先安装 Python3"
+# 检查 Python 命令
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+else
+    echo "错误: 未找到 Python，请先安装 Python"
     exit 1
 fi
 
 echo "  Node.js: $(node -v)"
-echo "  Python: $(python3 --version)"
+echo "  Python: $($PYTHON_CMD --version)"
 
 echo ""
 echo "[2/5] 安装前端依赖..."
@@ -45,11 +50,11 @@ echo "  静态文件已复制到: $STATIC_DIR"
 echo ""
 echo "[5/5] 安装后端依赖..."
 cd "$BACKEND_DIR"
-if [ -d "venv" ]; then
+if [ -d ".venv" ]; then
     echo "  检测到虚拟环境，激活中..."
-    source venv/bin/activate
+    source .venv/bin/activate
 else
-    echo "  提示: 未检测到虚拟环境，建议创建: python3 -m venv venv && source venv/bin/activate"
+    echo "  提示: 未检测到虚拟环境，建议创建: $PYTHON_CMD -m venv .venv && source .venv/bin/activate"
 fi
 pip install -r requirements.txt
 
