@@ -370,13 +370,9 @@ const loadStockData = async () => {
 
   loading.value = true
   try {
-    // 计算日期范围 - 使用历史数据（qlib数据通常到2024年）
-    const now = new Date()
-    // 如果当前日期超过2024年，使用2024年作为基准
-    const baseYear = now.getFullYear() > 2024 ? 2024 : now.getFullYear()
-    const endDate = new Date(baseYear, now.getMonth(), now.getDate())
-    const startDate = new Date(baseYear, now.getMonth(), now.getDate())
-
+    // 计算日期范围
+    const endDate = new Date()
+    const startDate = new Date()
     switch (timeRange.value) {
       case '1M':
         startDate.setMonth(startDate.getMonth() - 1)
