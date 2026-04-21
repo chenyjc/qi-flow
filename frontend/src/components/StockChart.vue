@@ -44,6 +44,10 @@
       </div>
       <div class="stock-metrics">
         <div class="metric-item">
+          <span class="metric-label">日期</span>
+          <span class="metric-value">{{ currentDate }}</span>
+        </div>
+        <div class="metric-item">
           <span class="metric-label">今开</span>
           <span class="metric-value">{{ currentStock.open?.toFixed(2) }}</span>
         </div>
@@ -122,16 +126,16 @@ const timeRange = ref('3M')
 const chartContainer = ref(null)
 let chartInstance = null
 
-// 常用股票
+// 常用股票 - 2026年热门股票
 const quickStocks = [
-  { code: '000001.SZ', name: '平安银行' },
-  { code: '000002.SZ', name: '万科A' },
-  { code: '600000.SH', name: '浦发银行' },
-  { code: '600036.SH', name: '招商银行' },
-  { code: '000858.SZ', name: '五粮液' },
-  { code: '600519.SH', name: '贵州茅台' },
-  { code: '000333.SZ', name: '美的集团' },
-  { code: '002415.SZ', name: '海康威视' }
+  { code: '002594.SZ', name: '比亚迪' },
+  { code: '300750.SZ', name: '宁德时代' },
+  { code: '603288.SH', name: '海天味业' },
+  { code: '600276.SH', name: '恒瑞医药' },
+  { code: '002475.SZ', name: '立讯精密' },
+  { code: '300760.SZ', name: '迈瑞医疗' },
+  { code: '002714.SZ', name: '牧原股份' },
+  { code: '600900.SH', name: '长江电力' }
 ]
 
 // 涨跌幅样式
@@ -175,13 +179,23 @@ const initChart = () => {
         if (!data) return ''
         const date = data.name
         const values = data.data
+        const open = values[1]
+        const close = values[2]
+        const low = values[3]
+        const high = values[4]
+        const volume = values[5]
+        const change = ((close - open) / open * 100)
+        const changeClass = change >= 0 ? 'up' : 'down'
+        const changeColor = change >= 0 ? '#ef232a' : '#14b143'
+        const changeSign = change >= 0 ? '+' : ''
         return `
           <div style="font-weight:bold;margin-bottom:5px">${date}</div>
-          <div>开盘: ${values[1]}</div>
-          <div>收盘: ${values[2]}</div>
-          <div>最低: ${values[3]}</div>
-          <div>最高: ${values[4]}</div>
-          <div>成交量: ${(values[5] / 10000).toFixed(2)}万</div>
+          <div>开盘: ${open.toFixed(2)}</div>
+          <div>收盘: ${close.toFixed(2)}</div>
+          <div>最低: ${low.toFixed(2)}</div>
+          <div>最高: ${high.toFixed(2)}</div>
+          <div style="color:${changeColor};font-weight:bold">涨跌幅: ${changeSign}${change.toFixed(2)}%</div>
+          <div>成交量: ${(volume / 10000).toFixed(2)}万</div>
         `
       }
     },
@@ -377,7 +391,7 @@ const loadStockData = async () => {
     }
 
     // 调用后端API获取数据
-    const res = await axios.get(`${API_BASE_URL}/stock/quote`, {
+    const res = await axios.get(`${API_BASE_URL}/qlib/stock/quote`, {
       params: {
         code: currentStock.value.code,
         start_date: startDate.toISOString().split('T')[0],
