@@ -1412,3 +1412,49 @@ class QlibService:
                                 print(f"已删除文件: {dir_path}")
         except Exception as e:
             print(f"清理mlruns文件失败: {e}")
+
+    def get_stock_quote(self, stock_code, start_date, end_date):
+        """获取股票行情数据（K线）"""
+        try:
+            from qlib.data import D
+            import pandas as pd
+
+            # 确保Qlib已初始化
+            self.init_qlib()
+
+            # 获取股票数据
+            df = D.features(
+                instruments=[stock_code],
+                fields=['$open', '$close', '$high', '$low', '$volume', '$amount'],
+                start_time=start_date,
+                end_time=end_date
+            )
+
+            if df.empty:
+                return {"success": False, "message": f"未找到股票 {stock_code} 的数据"}
+
+            # 转换为前端需要的格式
+            result = []
+            for date, row in df.iterrows():
+                result.append({
+                    "date": date.strftime('%Y-%m-%d'),
+                    "open": float(row['$open']),
+                    "close": float(row['$close']),
+                    "high": float(row['$high']),
+                    "low": float(row['$low']),
+                    "volume": int(row['$volume']),
+                    "amount": float(row['$amount']),
+                    "pre_close": float(row['$close'])  # 前一个收盘价，用当前代替
+                })
+
+            # 计算涨跌幅
+            for i in range(1, len(result)):
+                result[i]['pre_close'] = result[i-1]['close']
+
+            return {
+                "success": True,
+                "data": result,
+                "code": stock_code
+            }
+        except Exception as e:
+            return {"success": False, "message": f"获取股票行情失败: {str(e)}"}

@@ -342,3 +342,19 @@ async def delete_backtest_recorder(recorder_id: str):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class StockQuoteRequest(BaseModel):
+    code: str
+    start_date: str
+    end_date: str
+
+
+@router.get("/stock/quote")
+async def get_stock_quote(code: str, start_date: str, end_date: str):
+    """获取股票行情数据"""
+    try:
+        result = qlib_service.get_stock_quote(code, start_date, end_date)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

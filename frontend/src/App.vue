@@ -112,13 +112,15 @@ import ModelTrain from './components/ModelTrain.vue'
 import StrategyBacktest from './components/StrategyBacktest.vue'
 import BacktestResults from './components/BacktestResults.vue'
 import ModelEvaluation from './components/ModelEvaluation.vue'
+import StockChart from './components/StockChart.vue'
 
 const tabs = [
   { name: 'data', label: '数据管理', icon: '📦', component: DataPreview },
   { name: 'train', label: '模型训练', icon: '🚀', component: ModelTrain },
   { name: 'evaluation', label: '模型评估', icon: '📊', component: ModelEvaluation },
   { name: 'backtest', label: '策略回测', icon: '🎯', component: StrategyBacktest },
-  { name: 'results', label: '回测结果', icon: '📈', component: BacktestResults }
+  { name: 'results', label: '回测结果', icon: '📈', component: BacktestResults },
+  { name: 'chart', label: '行情', icon: '📉', component: StockChart }
 ]
 
 // 从 URL hash 初始化 activeTab

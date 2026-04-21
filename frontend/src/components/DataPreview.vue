@@ -83,7 +83,7 @@
           <tbody>
             <tr v-for="row in rows" :key="row.date">
               <td>{{ row.date }}</td>
-              <td>{{ row.stock }}</td>
+              <td><StockLink :code="row.stock" /></td>
               <td>{{ row.open }}</td>
               <td>{{ row.close }}</td>
               <td>{{ row.high }}</td>
@@ -108,6 +108,7 @@
 import { ref } from 'vue'
 import axios from 'axios'
 import { ElMessageBox } from 'element-plus'
+import StockLink from './StockLink.vue'
 
 const API = '/api'
 

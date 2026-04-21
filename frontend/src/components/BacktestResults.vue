@@ -164,7 +164,11 @@
         </div>
         <div class="popup-table">
           <el-table :data="positions" style="width: 100%" size="small">
-            <el-table-column prop="stock_code" label="股票代码" align="center" width="90" />
+            <el-table-column label="股票代码" align="center" width="90">
+            <template #default="{ row }">
+              <StockLink :code="row.stock_code" />
+            </template>
+          </el-table-column>
             <el-table-column prop="stock_name" label="股票名称" align="center" width="100" />
             <el-table-column prop="weight" label="权重" align="center" width="80">
               <template #default="{ row }">
@@ -225,7 +229,11 @@
           :data="positions"
           style="width: 100%"
         >
-          <el-table-column prop="stock_code" label="股票代码" align="center" />
+          <el-table-column label="股票代码" align="center">
+            <template #default="{ row }">
+              <StockLink :code="row.stock_code" />
+            </template>
+          </el-table-column>
           <el-table-column prop="stock_name" label="股票名称" align="center" />
           <el-table-column prop="weight" label="权重" align="center">
             <template #default="{ row }">
@@ -286,7 +294,11 @@
             :default-sort="{ prop: 'date', order: 'descending' }"
           >
             <el-table-column prop="date" label="日期" sortable align="center" />
-            <el-table-column prop="stock_code" label="股票代码" align="center" />
+            <el-table-column label="股票代码" align="center">
+              <template #default="{ row }">
+                <StockLink :code="row.stock_code" />
+              </template>
+            </el-table-column>
             <el-table-column prop="stock_name" label="股票名称" align="center" />
             <el-table-column prop="weight" label="权重" align="center">
               <template #default="{ row }">
@@ -360,6 +372,7 @@ import { ref, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { Chart, registerables } from 'chart.js'
+import StockLink from './StockLink.vue'
 
 Chart.register(...registerables)
 
