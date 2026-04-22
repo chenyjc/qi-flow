@@ -80,7 +80,23 @@
           <div class="metric-card">
             <div class="metric-icon">📈</div>
             <div class="metric-content">
-              <span class="metric-label">IC</span>
+              <div class="metric-header">
+                <span class="metric-label">IC</span>
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div class="metric-tooltip">
+                      <strong>IC (Information Coefficient)</strong><br/>
+                      预测值与实际收益的相关系数。<br/><br/>
+                      <strong>解读：</strong><br/>
+                      • IC > 0.05：预测能力较强<br/>
+                      • IC > 0.02：有一定预测能力<br/>
+                      • IC < 0：预测方向相反<br/><br/>
+                      <strong>计算：</strong> Pearson相关系数
+                    </div>
+                  </template>
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span class="metric-value" :class="getMetricClass(evaluationResult.metrics?.IC)">
                 {{ formatMetric(evaluationResult.metrics?.IC) }}
               </span>
@@ -90,7 +106,23 @@
           <div class="metric-card">
             <div class="metric-icon">🎯</div>
             <div class="metric-content">
-              <span class="metric-label">ICIR</span>
+              <div class="metric-header">
+                <span class="metric-label">ICIR</span>
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div class="metric-tooltip">
+                      <strong>ICIR (Information Ratio)</strong><br/>
+                      IC的均值除以IC的标准差，衡量预测稳定性。<br/><br/>
+                      <strong>解读：</strong><br/>
+                      • ICIR > 0.5：预测非常稳定<br/>
+                      • ICIR > 0.2：预测较稳定<br/>
+                      • ICIR < 0：预测不稳定<br/><br/>
+                      <strong>计算：</strong> IC均值 / IC标准差
+                    </div>
+                  </template>
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span class="metric-value" :class="getMetricClass(evaluationResult.metrics?.ICIR)">
                 {{ formatMetric(evaluationResult.metrics?.ICIR) }}
               </span>
@@ -100,7 +132,24 @@
           <div class="metric-card">
             <div class="metric-icon">📊</div>
             <div class="metric-content">
-              <span class="metric-label">Rank IC</span>
+              <div class="metric-header">
+                <span class="metric-label">Rank IC</span>
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div class="metric-tooltip">
+                      <strong>Rank IC</strong><br/>
+                      预测排名与实际收益排名的相关系数。<br/><br/>
+                      <strong>解读：</strong><br/>
+                      • Rank IC > 0.05：排序预测能力强<br/>
+                      • Rank IC > 0.02：有一定排序能力<br/>
+                      • Rank IC < 0：排序方向相反<br/><br/>
+                      <strong>计算：</strong> Spearman秩相关系数<br/>
+                      <strong>优势：</strong> 对异常值更稳健
+                    </div>
+                  </template>
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span class="metric-value" :class="getMetricClass(evaluationResult.metrics?.Rank_IC)">
                 {{ formatMetric(evaluationResult.metrics?.Rank_IC) }}
               </span>
@@ -110,7 +159,23 @@
           <div class="metric-card">
             <div class="metric-icon">🎲</div>
             <div class="metric-content">
-              <span class="metric-label">Rank ICIR</span>
+              <div class="metric-header">
+                <span class="metric-label">Rank ICIR</span>
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div class="metric-tooltip">
+                      <strong>Rank ICIR</strong><br/>
+                      Rank IC的均值除以标准差，衡量排序预测稳定性。<br/><br/>
+                      <strong>解读：</strong><br/>
+                      • Rank ICIR > 0.5：排序预测非常稳定<br/>
+                      • Rank ICIR > 0.2：排序预测较稳定<br/>
+                      • Rank ICIR < 0：排序预测不稳定<br/><br/>
+                      <strong>计算：</strong> Rank IC均值 / Rank IC标准差
+                    </div>
+                  </template>
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span class="metric-value" :class="getMetricClass(evaluationResult.metrics?.Rank_ICIR)">
                 {{ formatMetric(evaluationResult.metrics?.Rank_ICIR) }}
               </span>
@@ -120,7 +185,23 @@
           <div class="metric-card">
             <div class="metric-icon">📉</div>
             <div class="metric-content">
-              <span class="metric-label">Long Precision</span>
+              <div class="metric-header">
+                <span class="metric-label">Long Precision</span>
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div class="metric-tooltip">
+                      <strong>Long Precision (多头精度)</strong><br/>
+                      预测为正收益的股票中，实际正收益的比例。<br/><br/>
+                      <strong>解读：</strong><br/>
+                      • > 50%：多头预测有效<br/>
+                      • > 55%：多头预测较好<br/>
+                      • > 60%：多头预测优秀<br/><br/>
+                      <strong>应用：</strong> 用于选股策略，判断买入信号的可靠性
+                    </div>
+                  </template>
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span class="metric-value">
                 {{ formatPercent(evaluationResult.metrics?.Long_precision) }}
               </span>
@@ -130,7 +211,23 @@
           <div class="metric-card">
             <div class="metric-icon">📈</div>
             <div class="metric-content">
-              <span class="metric-label">Short Precision</span>
+              <div class="metric-header">
+                <span class="metric-label">Short Precision</span>
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div class="metric-tooltip">
+                      <strong>Short Precision (空头精度)</strong><br/>
+                      预测为负收益的股票中，实际负收益的比例。<br/><br/>
+                      <strong>解读：</strong><br/>
+                      • > 50%：空头预测有效<br/>
+                      • > 55%：空头预测较好<br/>
+                      • > 60%：空头预测优秀<br/><br/>
+                      <strong>应用：</strong> 用于做空策略或规避风险股票
+                    </div>
+                  </template>
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span class="metric-value">
                 {{ formatPercent(evaluationResult.metrics?.Short_precision) }}
               </span>
@@ -1065,6 +1162,33 @@ const deleteAllRecorders = async () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-icon {
+  font-size: 14px;
+  color: #8a94a6;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.help-icon:hover {
+  color: #3b82f6;
+}
+
+.metric-tooltip {
+  max-width: 280px;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.metric-tooltip strong {
+  color: #2c3e50;
 }
 
 .metric-label {

@@ -2,7 +2,7 @@ import qlib
 from qlib.constant import REG_CN
 from qlib.utils import init_instance_by_config
 from qlib.workflow import R
-from qlib.workflow.record_temp import SignalRecord, PortAnaRecord
+from qlib.workflow.record_temp import SignalRecord, SigAnaRecord, PortAnaRecord
 from qlib.utils import flatten_dict
 from qlib.contrib.report import analysis_model, analysis_position
 from qlib.data import D
@@ -20,23 +20,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 class QlibService:
+    _qlib_initialized = False
+
     def __init__(self):
         import os
-        # 使用绝对路径
         self.provider_uri = os.path.expanduser("~/.qlib/qlib_data/cn_data")
         print(f"Qlib数据路径: {self.provider_uri}")
         print(f"路径是否存在: {os.path.exists(self.provider_uri)}")
         self.init_qlib()
         self.init_stock_db()
-    
-    def init_qlib(self, force=False):
-        """初始化Qlib"""
-        try:
-            if force:
-                qlib._initialized = False
 
-            if not hasattr(qlib, '_initialized') or not qlib._initialized:
+    def init_qlib(self, force=False):
+        try:
+            if force or not QlibService._qlib_initialized:
                 qlib.init(provider_uri=self.provider_uri, region=REG_CN)
+                QlibService._qlib_initialized = True
 
             sqlite_uri = "sqlite:///mlflow.db"
             R.set_uri(sqlite_uri)
@@ -45,17 +43,14 @@ class QlibService:
             try:
                 provider_uri = os.path.expanduser("~/.qlib/qlib_data/cn_data")
                 qlib.init(provider_uri=provider_uri, region=REG_CN)
+                QlibService._qlib_initialized = True
                 print(f"使用绝对路径初始化Qlib成功: {provider_uri}")
             except Exception as e2:
                 print(f"使用绝对路径初始化Qlib也失败: {e2}")
-    
+
     def release_qlib(self):
-        """释放Qlib对数据目录的占用"""
         try:
-            # 清除Qlib的缓存和连接
-            if hasattr(qlib, '_initialized'):
-                qlib._initialized = False
-            # 清除数据缓存
+            QlibService._qlib_initialized = False
             from qlib.data import D
             if hasattr(D, '_data'):
                 D._data = None
@@ -220,17 +215,26 @@ class QlibService:
             return {"success": False, "message": f"获取发布日期失败: {str(e)}"}
     
     def download_data_with_progress(self, progress_callback=None):
-        """下载Qlib数据（Python实现，带进度回调）"""
         try:
             import shutil
             import tarfile
             import json
+            import socket
+            import hashlib
             
             url = "https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz"
             api_url = "https://api.github.com/repos/chenditc/investment_data/releases/latest"
             target_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data")
             backup_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data_backup")
             temp_file = os.path.join(os.path.expanduser("~/.qlib"), "qlib_bin.tar.gz")
+            
+            proxy_url = "http://192.168.71.101:8080"
+            proxy_handler = urllib.request.ProxyHandler({
+                'http': proxy_url,
+                'https': proxy_url
+            })
+            opener = urllib.request.build_opener(proxy_handler)
+            urllib.request.install_opener(opener)
             
             def report_progress(progress, message):
                 print(f"[下载进度] {progress}%: {message}")
@@ -239,11 +243,11 @@ class QlibService:
             
             report_progress(0, "检查数据发布日期...")
             
-            # 获取最新 release 信息
             release_date = None
             try:
                 req = urllib.request.Request(api_url)
-                with urllib.request.urlopen(req, timeout=30) as response:
+                req.add_header('User-Agent', 'Mozilla/5.0')
+                with opener.open(req, timeout=30) as response:
                     release_info = json.loads(response.read().decode('utf-8'))
                     release_date = release_info.get('published_at', '')
                     if release_date:
@@ -257,34 +261,83 @@ class QlibService:
             
             os.makedirs(os.path.dirname(temp_file), exist_ok=True)
             
-            # 获取文件大小
-            req = urllib.request.Request(url, method='HEAD')
-            with urllib.request.urlopen(req, timeout=30) as response:
-                file_size = int(response.headers.get('Content-Length', 0))
+            socket.setdefaulttimeout(600)
             
-            if file_size > 0:
-                report_progress(15, f"文件大小: {file_size / 1024 / 1024:.2f} MB")
-            
-            report_progress(20, "开始下载...")
-            
-            # 下载文件
-            downloaded = 0
-            chunk_size = 1024 * 1024
-            
-            with urllib.request.urlopen(url, timeout=300) as response:
-                with open(temp_file, 'wb') as f:
-                    while True:
-                        data = response.read(chunk_size)
-                        if not data:
-                            break
-                        f.write(data)
-                        downloaded += len(data)
-                        progress = int(20 + downloaded / file_size * 60)
-                        report_progress(progress, f"下载中 {downloaded/1024/1024:.1f}MB / {file_size/1024/1024:.1f}MB")
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    if retry > 0:
+                        report_progress(10, f"第 {retry + 1} 次重试下载...")
+                    
+                    req = urllib.request.Request(url)
+                    req.add_header('User-Agent', 'Mozilla/5.0')
+                    req.add_header('Accept', '*/*')
+                    
+                    with opener.open(req) as response:
+                        file_size = int(response.headers.get('Content-Length', 0))
+                        if file_size > 0:
+                            report_progress(15, f"文件大小: {file_size / 1024 / 1024:.2f} MB")
+                        else:
+                            report_progress(15, "开始下载（未知文件大小）...")
+                        
+                        report_progress(20, "开始下载...")
+                        
+                        downloaded = 0
+                        chunk_size = 1024 * 1024
+                        
+                        with open(temp_file, 'wb') as f:
+                            while True:
+                                try:
+                                    data = response.read(chunk_size)
+                                    if not data:
+                                        break
+                                    f.write(data)
+                                    downloaded += len(data)
+                                    if file_size > 0:
+                                        progress = int(20 + downloaded / file_size * 60)
+                                        report_progress(progress, f"下载中 {downloaded/1024/1024:.1f}MB / {file_size/1024/1024:.1f}MB")
+                                    else:
+                                        progress = int(20 + min(downloaded / (500 * 1024 * 1024) * 60, 60))
+                                        report_progress(progress, f"下载中 {downloaded/1024/1024:.1f}MB")
+                                except socket.timeout:
+                                    print(f"读取超时，已下载 {downloaded/1024/1024:.1f}MB")
+                                    if downloaded > 0:
+                                        continue
+                                    raise
+                            f.flush()
+                            os.fsync(f.fileno())
+                    
+                    actual_size = os.path.getsize(temp_file)
+                    if file_size > 0 and actual_size != file_size:
+                        print(f"文件大小不匹配: 期望 {file_size}, 实际 {actual_size}")
+                        if retry < max_retries - 1:
+                            continue
+                    
+                    try:
+                        with tarfile.open(temp_file, "r:gz") as test_tar:
+                            test_tar.getmembers()
+                        print("文件完整性验证通过")
+                        break
+                    except tarfile.TarError as e:
+                        print(f"文件完整性验证失败: {e}")
+                        if retry < max_retries - 1:
+                            os.remove(temp_file)
+                            continue
+                        raise Exception(f"下载文件损坏，重试 {max_retries} 次后仍失败")
+                    
+                except urllib.error.URLError as e:
+                    print(f"下载失败: {e}")
+                    if retry < max_retries - 1:
+                        continue
+                    raise
+                except Exception as e:
+                    print(f"下载异常: {e}")
+                    if retry < max_retries - 1:
+                        continue
+                    raise
             
             report_progress(80, "下载完成")
             
-            # 备份旧数据
             if os.path.exists(target_dir):
                 report_progress(85, "备份旧数据...")
                 if os.path.exists(backup_dir):
@@ -293,7 +346,6 @@ class QlibService:
             
             report_progress(88, "开始解压...")
             
-            # 解压文件
             os.makedirs(target_dir, exist_ok=True)
             with tarfile.open(temp_file, "r:gz") as tar:
                 members = tar.getmembers()
@@ -306,7 +358,6 @@ class QlibService:
                         progress = int(88 + (i + 1) / total * 10)
                         report_progress(progress, f"解压中 {i+1}/{total}")
             
-            # 删除临时文件
             os.remove(temp_file)
             
             report_progress(100, "数据下载完成")
@@ -322,53 +373,160 @@ class QlibService:
         """下载Qlib数据（备份旧数据后替换，多线程加速）"""
         return self.download_data_with_progress(None)
     
+    MODEL_REGISTRY = {
+        "LGBModel": "qlib.contrib.model.gbdt",
+        "XGBModel": "qlib.contrib.model.xgboost",
+        "CatBoostModel": "qlib.contrib.model.catboost_model",
+        "Linear": "qlib.contrib.model.linear",
+        "DEnsembleModel": "qlib.contrib.model.double_ensemble",
+        "LSTM": "qlib.contrib.model.pytorch_lstm",
+        "GRU": "qlib.contrib.model.pytorch_gru",
+        "ALSTM": "qlib.contrib.model.pytorch_alstm",
+        "DNN": "qlib.contrib.model.pytorch_nn",
+        "GATs": "qlib.contrib.model.pytorch_gats",
+        "TCN": "qlib.contrib.model.pytorch_tcn",
+        "SFM": "qlib.contrib.model.pytorch_sfm",
+        "TabnetModel": "qlib.contrib.model.pytorch_tabnet",
+    }
+
+    HANDLER_REGISTRY = {
+        "Alpha158": "qlib.contrib.data.handler",
+        "Alpha360": "qlib.contrib.data.handler",
+        "Alpha158DL": "qlib.contrib.data.handler",
+        "Alpha360DL": "qlib.contrib.data.handler",
+        "Alpha158vwap": "qlib.contrib.data.handler",
+        "Alpha360vwap": "qlib.contrib.data.handler",
+    }
+
+    def _get_model_config(self, model_type, lr, max_depth, num_leaves, subsample, colsample_bytree, seed, num_threads):
+        module_path = self.MODEL_REGISTRY.get(model_type, "qlib.contrib.model.gbdt")
+        
+        if model_type == "Linear":
+            return {
+                "class": "LinearModel",
+                "module_path": module_path,
+                "kwargs": {
+                    "estimator": "ols",
+                    "alpha": 0.0,
+                    "fit_intercept": False,
+                    "include_valid": False,
+                },
+            }
+        
+        if model_type == "CatBoostModel":
+            return {
+                "class": "CatBoostModel",
+                "module_path": module_path,
+                "kwargs": {
+                    "loss": "RMSE",
+                    "learning_rate": lr,
+                    "depth": max_depth,
+                    "subsample": subsample,
+                    "random_seed": seed,
+                    "thread_count": num_threads,
+                },
+            }
+        
+        if model_type == "DEnsembleModel":
+            return {
+                "class": "DEnsembleModel",
+                "module_path": module_path,
+                "kwargs": {
+                    "loss": "mse",
+                    "learning_rate": lr,
+                    "max_depth": max_depth,
+                    "num_leaves": num_leaves,
+                    "subsample": subsample,
+                    "colsample_bytree": colsample_bytree,
+                    "random_state": seed,
+                    "num_threads": num_threads,
+                },
+            }
+        
+        if model_type == "TabnetModel":
+            return {
+                "class": "TabnetModel",
+                "module_path": module_path,
+                "kwargs": {
+                    "n_epochs": 200,
+                    "lr": lr,
+                    "batch_size": 800,
+                    "early_stopping_rounds": 50,
+                    "seed": seed,
+                },
+            }
+        
+        pytorch_models = ["LSTM", "GRU", "ALSTM", "DNN", "GATs", "TCN", "SFM"]
+        if model_type in pytorch_models:
+            return {
+                "class": model_type,
+                "module_path": module_path,
+                "kwargs": {
+                    "d_feat": 6,
+                    "hidden_size": 64,
+                    "num_layers": 2,
+                    "dropout": 0.0,
+                    "n_epochs": 200,
+                    "lr": lr,
+                    "batch_size": 800,
+                    "early_stopping_rounds": 50,
+                    "seed": seed,
+                },
+            }
+        
+        kwargs = {
+            "loss": "mse",
+            "colsample_bytree": colsample_bytree,
+            "learning_rate": lr,
+            "subsample": subsample,
+            "lambda_l1": 205.6999,
+            "lambda_l2": 580.9768,
+            "max_depth": max_depth,
+            "num_leaves": num_leaves,
+            "num_threads": num_threads,
+            "random_state": seed,
+            "deterministic": True,
+        }
+        return {
+            "class": model_type,
+            "module_path": module_path,
+            "kwargs": kwargs,
+        }
+
     def train_model_with_progress(self, progress_callback, market, benchmark, train_start_date, train_end_date,
                     valid_start_date, valid_end_date, test_start_date, test_end_date,
                     model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
-                    seed=42, num_threads=1):
+                    seed=42, num_threads=1, handler_type="Alpha158"):
         """训练模型（带进度回调）"""
+        rid = None
         try:
             progress_callback(0, "开始训练模型...")
 
             progress_callback(10, "配置数据处理参数...")
 
-            # 数据处理配置
             data_handler_config = {
                 "start_time": train_start_date,
                 "end_time": test_end_date,
                 "fit_start_time": train_start_date,
-                "fit_end_time": valid_end_date,
+                "fit_end_time": train_end_date,
                 "instruments": market,
             }
 
             progress_callback(20, "构建任务配置...")
 
-            # 构建任务配置
+            model_config = self._get_model_config(model_type, lr, max_depth, num_leaves, subsample, colsample_bytree, seed, num_threads)
+
+            handler_module_path = self.HANDLER_REGISTRY.get(handler_type, "qlib.contrib.data.handler")
+
             task = {
-                "model": {
-                    "class": model_type,
-                    "module_path": "qlib.contrib.model.gbdt",
-                    "kwargs": {
-                        "loss": "mse",
-                        "colsample_bytree": colsample_bytree,
-                        "learning_rate": lr,
-                        "subsample": subsample,
-                        "lambda_l1": 205.6999,
-                        "lambda_l2": 580.9768,
-                        "max_depth": max_depth,
-                        "num_leaves": num_leaves,
-                        "num_threads": num_threads,
-                        "random_state": seed,
-                        "deterministic": True,
-                    },
-                },
+                "model": model_config,
                 "dataset": {
                     "class": "DatasetH",
                     "module_path": "qlib.data.dataset",
                     "kwargs": {
                         "handler": {
-                            "class": "Alpha158",
-                            "module_path": "qlib.contrib.data.handler",
+                            "class": handler_type,
+                            "module_path": handler_module_path,
                             "kwargs": data_handler_config,
                         },
                         "segments": {
@@ -382,23 +540,18 @@ class QlibService:
             
             progress_callback(30, "初始化模型...")
             
-            # 初始化模型
             model = init_instance_by_config(task["model"])
             
             progress_callback(40, "初始化数据集...")
             
-            # 初始化数据集
             dataset = init_instance_by_config(task["dataset"])
             
             progress_callback(50, "开始模型训练...")
             
-            # 生成记录名称
             current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             train_recorder_name = f"{current_time}_{market}_{train_start_date.replace('-', '')}_to_{train_end_date.replace('-', '')}"
             
-            # 训练模型 - 使用 recorder_name 参数指定名称
             with R.start(experiment_name="train_model", recorder_name=train_recorder_name):
-                # 保存训练参数
                 R.log_params(
                     market=market,
                     benchmark=benchmark,
@@ -409,7 +562,8 @@ class QlibService:
                     test_start_date=test_start_date,
                     test_end_date=test_end_date,
                     fit_start_time=train_start_date,
-                    fit_end_time=valid_end_date,
+                    fit_end_time=train_end_date,
+                    handler_type=handler_type,
                     model_type=model_type,
                     lr=lr,
                     max_depth=max_depth,
@@ -419,7 +573,6 @@ class QlibService:
                     **flatten_dict(task)
                 )
                 
-                # 获取 recorder id
                 recorder = R.get_recorder()
                 rid = recorder.id
                 
@@ -427,30 +580,26 @@ class QlibService:
                 model.fit(dataset)
 
                 progress_callback(75, "生成预测结果...")
-                # 在训练记录中生成预测信号和标签
                 recorder = R.get_recorder()
                 sr = SignalRecord(model, dataset, recorder)
                 sr.generate()
 
+                sar = SigAnaRecord(recorder)
+                sar.generate()
+
                 progress_callback(80, "计算评估指标...")
-                # 加载预测和标签数据用于评估
                 pred = recorder.load_object("pred.pkl")
                 label = recorder.load_object("label.pkl")
 
-                # 合并预测和标签
                 pred_label = pd.concat([pred, label], axis=1)
 
-                # 计算IC指标
                 from qlib.workflow.record_temp import calc_ic, calc_long_short_prec, calc_long_short_return
                 ic, ric = calc_ic(pred.iloc[:, 0], label.iloc[:, 0])
 
-                # 计算长短期精度
                 long_pre, short_pre = calc_long_short_prec(pred.iloc[:, 0], label.iloc[:, 0], is_alpha=True)
 
-                # 计算长短期收益
                 long_short_r, long_avg_r = calc_long_short_return(pred.iloc[:, 0], label.iloc[:, 0])
 
-                # 计算关键指标
                 metrics = {
                     "IC": float(ic.mean()),
                     "ICIR": float(ic.mean() / ic.std()),
@@ -462,14 +611,11 @@ class QlibService:
                     "Long_Short_Avg_Sharpe": float(long_short_r.mean() / long_short_r.std()) if long_short_r.std() != 0 else 0,
                 }
 
-                # 保存指标
                 R.log_metrics(**metrics)
 
-                # 生成分组收益数据用于可视化
                 pred_label_df = pred_label.copy()
                 pred_label_df.columns = ['score', 'label']
 
-                # 计算分组收益 (5组)
                 N = 5
                 pred_label_drop = pred_label_df.dropna(subset=['score'])
                 pred_label_sorted = pred_label_drop.sort_values('score', ascending=False)
@@ -482,7 +628,6 @@ class QlibService:
                     )
                     group_returns[group_name] = group_data.dropna().tolist()
 
-                # 多空收益
                 long_short = pd.Series(group_returns['Group1']) - pd.Series(group_returns['Group5'])
                 long_avg = pd.Series(group_returns['Group1']) - pred_label_df.groupby(level='datetime')['label'].mean()
 
@@ -490,7 +635,6 @@ class QlibService:
                 group_returns['long_average'] = long_avg.dropna().tolist()
                 group_returns['dates'] = pred_label_df.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
 
-                # 计算测试集收益（按组）
                 test_returns = {}
                 test_pred_label = pred_label_df[
                     (pred_label_df.index.get_level_values('datetime') >= test_start_date) &
@@ -507,25 +651,21 @@ class QlibService:
                         )
                         test_returns[group_name] = group_data.dropna().tolist()
 
-                    # 测试集多空收益
                     test_long_short = pd.Series(test_returns['Group1']) - pd.Series(test_returns['Group5'])
                     test_returns['long_short'] = test_long_short.dropna().tolist()
                     test_returns['dates'] = test_pred_label.index.get_level_values('datetime').unique().strftime('%Y-%m-%d').tolist()
                 else:
-                    # 如果没有测试集数据，使用空数据
                     for i in range(N):
                         test_returns[f"Group{i+1}"] = []
                     test_returns['long_short'] = []
                     test_returns['dates'] = []
 
-                # 计算IC序列
                 ic_data = {
                     'dates': ic.index.strftime('%Y-%m-%d').tolist(),
                     'ic': ic.tolist(),
                     'rank_ic': ric.tolist()
                 }
 
-                # 保存可视化数据
                 viz_data = {
                     'metrics': metrics,
                     'group_returns': group_returns,
@@ -536,25 +676,15 @@ class QlibService:
 
                 progress_callback(85, "保存模型...")
 
-                # 获取 recorder 以便后续加载
                 recorder = R.get_recorder()
                 rid = recorder.id
                 print(f"保存模型到 recorder: {rid}")
 
-                # 保存模型 - 使用 recorder 直接保存
-                import os
-                import pickle
-                import tempfile
-
-                # 创建临时文件保存模型
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pkl') as tmp:
-                    pickle.dump(model, tmp)
-                    tmp_path = tmp.name
-
-                # 使用 recorder 保存模型文件
                 recorder.save_objects(trained_model=model)
 
-                # 同时保存为本地文件作为备份
+                import os
+                import pickle
+
                 mlruns_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mlruns")
                 model_backup_dir = os.path.join(mlruns_dir, "model_backups")
                 os.makedirs(model_backup_dir, exist_ok=True)
@@ -562,9 +692,6 @@ class QlibService:
                 with open(backup_path, 'wb') as f:
                     pickle.dump(model, f)
                 print(f"模型备份保存到: {backup_path}")
-
-                # 删除临时文件
-                os.unlink(tmp_path)
 
                 print(f"模型保存完成")
 
@@ -578,12 +705,12 @@ class QlibService:
     def train_model(self, market, benchmark, train_start_date, train_end_date,
                     valid_start_date, valid_end_date, test_start_date, test_end_date,
                     model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
-                    seed=42, num_threads=1):
+                    seed=42, num_threads=1, handler_type="Alpha158"):
         """训练模型"""
         return self.train_model_with_progress(None, market, benchmark, train_start_date, train_end_date,
                     valid_start_date, valid_end_date, test_start_date, test_end_date,
                     model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
-                    seed, num_threads)
+                    seed, num_threads, handler_type)
     
     def backtest_model(self, recorder_id, market, benchmark, start_date, end_date,
                       initial_account, topk, n_drop, hold_days, stop_loss, strategy_type):
@@ -779,7 +906,10 @@ class QlibService:
                 
                 sr = SignalRecord(model, dataset, recorder)
                 sr.generate()
-                
+
+                sar = SigAnaRecord(recorder)
+                sar.generate()
+
                 par = PortAnaRecord(recorder, port_analysis_config, "day")
                 par.generate()
             
@@ -832,7 +962,25 @@ class QlibService:
             return {"success": True, "recorders": recorder_list}
         except Exception as e:
             return {"success": False, "message": f"获取回测记录失败: {str(e)}"}
-    
+
+    def _get_trading_days_before(self, target_date, n_days, market="csi300"):
+        target_date = pd.Timestamp(target_date)
+        start_date = target_date - pd.Timedelta(days=n_days * 3 + 10)
+        end_date = target_date + pd.Timedelta(days=5)
+        try:
+            trading_days = D.calendar(freq="day", start_time=start_date.strftime('%Y-%m-%d'), end_time=end_date.strftime('%Y-%m-%d'))
+            trading_days = pd.to_datetime(trading_days)
+            trading_days_before = trading_days[trading_days <= target_date]
+            if len(trading_days_before) > n_days:
+                return trading_days_before.iloc[-(n_days + 1)]
+            elif len(trading_days_before) > 0:
+                return trading_days_before.iloc[0]
+            else:
+                return target_date - pd.Timedelta(days=n_days)
+        except Exception as e:
+            print(f"[DEBUG] 获取交易日历失败: {e}")
+            return target_date - pd.Timedelta(days=n_days)
+
     def get_backtest_result(self, recorder_id):
         """获取回测结果"""
         try:
@@ -935,12 +1083,9 @@ class QlibService:
                             profit_rate = 0.0
 
                             try:
-                                # 计算开仓日期
-                                open_date = date - pd.DateOffset(days=count_day)
-                                start_date = open_date - pd.DateOffset(days=2)
-                                end_date = open_date + pd.DateOffset(days=2)
-
-                                print(f"[DEBUG] Stock {stock}, date={date}, count_day={count_day}, open_date={open_date}")
+                                open_date = self._get_trading_days_before(date, count_day)
+                                start_date = open_date - pd.Timedelta(days=5)
+                                end_date = open_date + pd.Timedelta(days=5)
 
                                 price_data = D.features(
                                     instruments=[stock],
@@ -949,16 +1094,10 @@ class QlibService:
                                     end_time=end_date.strftime('%Y-%m-%d')
                                 )
 
-                                print(f"[DEBUG] price_data empty={price_data.empty}, shape={price_data.shape if not price_data.empty else 0}")
-
                                 if not price_data.empty:
-                                    # 查找最接近开仓日期的价格
                                     date_diffs = abs(price_data.index.get_level_values('datetime') - open_date)
                                     min_diff_idx = date_diffs.argmin()
                                     avg_price = float(price_data.iloc[min_diff_idx]['$close'])
-                                    print(f"[DEBUG] Found avg_price={avg_price}, current_price={current_price}")
-                                else:
-                                    print(f"[DEBUG] No price data found for {stock} around {open_date}")
                             except Exception as e:
                                 print(f"[DEBUG] Error getting price for {stock}: {e}")
 
@@ -1017,22 +1156,18 @@ class QlibService:
                         # 计算开仓日的价格作为成本价
                         avg_price = current_price
                         try:
-                            # 获取开仓日期
-                            open_date = last_date - pd.DateOffset(days=count_day)
-                            
-                            # 使用QLib的D.features()获取开仓日的价格
-                            start_date = open_date - pd.DateOffset(days=2)
-                            end_date = open_date + pd.DateOffset(days=2)
-                            
+                            open_date = self._get_trading_days_before(last_date, count_day)
+                            start_date = open_date - pd.Timedelta(days=5)
+                            end_date = open_date + pd.Timedelta(days=5)
+
                             price_data = D.features(
                                 instruments=[stock],
                                 fields=['$close'],
                                 start_time=start_date.strftime('%Y-%m-%d'),
                                 end_time=end_date.strftime('%Y-%m-%d')
                             )
-                            
+
                             if not price_data.empty:
-                                # 查找最接近开仓日期的价格
                                 date_diffs = abs(price_data.index.get_level_values('datetime') - open_date)
                                 min_diff_idx = date_diffs.argmin()
                                 avg_price = float(price_data.iloc[min_diff_idx]['$close'])

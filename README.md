@@ -11,10 +11,12 @@
 ## 功能特性
 
 - **数据管理** - 支持沪深300、中证500、中证800、中证1000等多市场数据下载与预览
-- **模型训练** - 基于 Alpha158 因子的 GBDT 模型训练，支持 LightGBM、XGBoost
+- **模型训练** - 支持多种模型（LightGBM、XGBoost、CatBoost、LSTM、GRU等）和因子集（Alpha158、Alpha360等）
 - **策略回测** - TopkDropoutStrategy 策略回测，支持自定义参数配置
 - **结果分析** - 可视化展示收益曲线、持仓明细、关键绩效指标
 - **实时进度** - SSE 流式返回训练和下载进度
+
+> 📖 详细文档：[Qlib 模型与因子详解](docs/qlib_models_factors.md) - 包含所有支持的模型、因子、训练参数和评测指标的详细说明
 
 ## 技术栈
 
@@ -106,6 +108,16 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8008
 
 模型训练核心实现在 [`backend/services/qlib_service.py`](backend/services/qlib_service.py)，采用 Qlib 量化投资框架进行端到端的机器学习流水线训练。
 
+> 📖 **详细文档**: [Qlib 模型与因子详解](docs/qlib_models_factors.md) - 包含所有模型、因子、参数和评测指标的完整说明
+
+### 支持的模型和因子
+
+**因子类型**: Alpha158、Alpha360、Alpha158DL、Alpha360DL、Alpha158vwap、Alpha360vwap
+
+**传统机器学习模型**: LightGBM、XGBoost、CatBoost、线性模型、双重集成模型
+
+**深度学习模型**: LSTM、GRU、ALSTM、DNN、GATs、TCN、SFM、TabNet
+
 ### 1. 数据准备
 
 使用 **Alpha158** 数据处理器生成158个量化因子特征：
@@ -122,7 +134,7 @@ data_handler_config = {
 
 ### 2. 模型配置
 
-支持三种模型类型：**LightGBM**（默认）、**XGBoost**、**Linear**
+支持多种模型类型，详见 [Qlib 模型与因子详解](docs/qlib_models_factors.md)
 
 **LightGBM 默认参数**：
 

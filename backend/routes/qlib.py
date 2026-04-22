@@ -62,6 +62,7 @@ class TrainRequest(BaseModel):
     colsample_bytree: float = 0.8879
     seed: int = 42
     num_threads: int = 1
+    handler_type: str = "Alpha158"
 
 class BacktestRequest(BaseModel):
     recorder_id: str
@@ -189,7 +190,8 @@ async def train_model_stream(request: TrainRequest):
                     subsample=request.subsample,
                     colsample_bytree=request.colsample_bytree,
                     seed=request.seed,
-                    num_threads=request.num_threads
+                    num_threads=request.num_threads,
+                    handler_type=request.handler_type
                 )
             except Exception as e:
                 error_holder[0] = e
@@ -241,7 +243,8 @@ async def train_model(request: TrainRequest):
             subsample=request.subsample,
             colsample_bytree=request.colsample_bytree,
             seed=request.seed,
-            num_threads=request.num_threads
+            num_threads=request.num_threads,
+            handler_type=request.handler_type
         )
         return result
     except Exception as e:
