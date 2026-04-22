@@ -575,7 +575,7 @@ const calculateVolumeMA = (dayCount, data) => {
 }
 
 // 加载股票数据
-const loadStockData = async (loadMore = false, endDate = null) => {
+const loadStockData = async () => {
   if (!currentStock.value.code) return
 
   loading.value = true
@@ -593,62 +593,66 @@ const loadStockData = async (loadMore = false, endDate = null) => {
     
     const formattedCode = formatStockCode(currentStock.value.code)
     
-    // 计算日期范围
-    const defaultEndDate = new Date()
-    let startDate = new Date()
-    let requestEndDate = endDate || defaultEndDate
-    
-    switch (timePeriod.value) {
-      case '3M':
-        startDate.setMonth(startDate.getMonth() - 3)
-        break
-      case '6M':
-        startDate.setMonth(startDate.getMonth() - 6)
-        break
-      case '1Y':
-        startDate.setFullYear(startDate.getFullYear() - 1)
-        break
-      case '3Y':
-        startDate.setFullYear(startDate.getFullYear() - 3)
-        break
-    }
-    
-    // 如果是加载更多数据，设置更早的结束日期
-    if (loadMore && endDate) {
-      const endDateObj = new Date(endDate)
-      endDateObj.setDate(endDateObj.getDate() - 1) // 从当前数据的最后一天往前
-      requestEndDate = endDateObj
-      // 计算新的开始日期（加载更多天的数据）
-      startDate = new Date(requestEndDate)
-      startDate.setDate(startDate.getDate() - 60) // 每次加载 60 天
-    }
+    // 计算日期范围：直接加载3年的数据
+    const endDate = new Date()
+    const startDate = new Date()
+    startDate.setFullYear(startDate.getFullYear() - 3)
 
     // 调用后端 API 获取数据
     const res = await axios.get(`${API_BASE_URL}/qlib/stock/quote`, {
       params: {
         code: formattedCode,
         start_date: startDate.toISOString().split('T')[0],
-        end_date: requestEndDate.toISOString().split('T')[0]
+        end_date: endDate.toISOString().split('T')[0]
       }
     })
 
     if (res.data.success && res.data.data && res.data.data.length > 0) {
       const data = res.data.data
       updateStockInfo(data)
-      updateChart(data, loadMore)
+      updateChart(data)
+      // 根据当前选择的时间周期设置显示范围
+      setTimeRange()
     } else {
       console.warn('未获取到股票数据，请检查：1. 后端服务是否启动 2. Qlib 数据是否已下载 3. 股票代码格式是否正确')
-      // 不显示数据时清空图表
       clearChart()
     }
   } catch (e) {
     console.error('加载股票数据失败:', e)
     console.error('请确保：1. 后端服务已启动 (python backend/main.py) 2. Qlib 数据已下载')
-    // 加载失败时清空图表
     clearChart()
   } finally {
     loading.value = false
   }
+}
+
+// 根据时间周期设置显示范围
+const setTimeRange = () => {
+  if (!chart || cachedStockData.length === 0) return
+  
+  const endDate = new Date()
+  const startDate = new Date()
+  
+  switch (timePeriod.value) {
+    case '3M':
+      startDate.setMonth(startDate.getMonth() - 3)
+      break
+    case '6M':
+      startDate.setMonth(startDate.getMonth() - 6)
+      break
+    case '1Y':
+      startDate.setFullYear(startDate.getFullYear() - 1)
+      break
+    case '3Y':
+      startDate.setFullYear(startDate.getFullYear() - 3)
+      break
+  }
+  
+  // 设置时间范围
+  chart.timeScale().setVisibleRange({
+    from: startDate.getTime() / 1000,
+    to: endDate.getTime() / 1000
+  })
 }
 
 // 更新股票信息
@@ -670,19 +674,14 @@ const updateStockInfo = (data) => {
 }
 
 // 更新图表
-const updateChart = (data, loadMore = false) => {
+const updateChart = (data) => {
   if (!candlestickSeries || !data || data.length === 0) return
 
   // 缓存股票数据用于计算涨跌幅
-  if (!loadMore) {
-    cachedStockData = data
-  } else {
-    // 加载更多时，将新数据添加到缓存前面
-    cachedStockData = [...data, ...cachedStockData]
-  }
+  cachedStockData = data
 
   // 转换为 lightweight-charts 格式
-  const candleData = cachedStockData.map(item => ({
+  const candleData = data.map(item => ({
     time: item.date,
     open: item.open,
     high: item.high,
@@ -691,7 +690,7 @@ const updateChart = (data, loadMore = false) => {
   }))
 
   // 成交量数据
-  const volumeData = cachedStockData.map(item => ({
+  const volumeData = data.map(item => ({
     time: item.date,
     value: item.volume,
     color: item.close >= item.open ? '#ef232a' : '#14b143'
@@ -728,9 +727,6 @@ const updateChart = (data, loadMore = false) => {
   // 更新技术指标值
   updateMaValues(candleData)
   updateVolumeMaValues(volumeData)
-
-  // 自适应可见范围
-  chart.timeScale().fitContent()
 }
 
 // 更新技术指标值
@@ -783,7 +779,8 @@ const clearChart = () => {
 // 设置时间周期
 const setTimePeriod = (period) => {
   timePeriod.value = period
-  loadStockData()
+  // 只控制显示窗口，不重新加载数据
+  setTimeRange()
 }
 
 // 搜索股票
