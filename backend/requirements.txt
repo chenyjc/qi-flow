@@ -19,5 +19,9 @@ catboost
 xgboost
 # PyTorch (CUDA 12.8 for RTX 5080 Blackwell)
 # 安装命令: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# 直接下载torch：https://download.pytorch.org/whl/cu128/torch-2.11.0%2Bcu128-cp312-cp312-win_amd64.whl
+# 直接下载torchvision：https://download.pytorch.org/whl/cu128/torchvision-0.26.0%2Bcu128-cp312-cp312-win_amd64.whl
+# 安装命令：pip install "完整路径\torch-2.11.0+cu128-cp312-cp312-win_amd64.whl"
+# 安装命令：pip install "完整路径\torchvision-0.26.0+cu128-cp312-cp312-win_amd64.whl"
 torch>=2.7.0
 torchvision

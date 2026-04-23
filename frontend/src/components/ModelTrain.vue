@@ -113,10 +113,8 @@
                     <strong>因子类型选择</strong><br/>
                     选择用于训练的特征因子集。<br/><br/>
                     <strong>选项说明：</strong><br/>
-                    • Alpha158：158个经典Alpha因子，适合传统机器学习模型<br/>
+                    • Alpha158：158个经典Alpha因子，适合所有模型<br/>
                     • Alpha360：360个扩展因子，特征更丰富<br/>
-                    • Alpha158DL：Alpha158深度学习版，适合神经网络<br/>
-                    • Alpha360DL：Alpha360深度学习版<br/>
                     • Alpha158vwap：基于VWAP的Alpha158<br/>
                     • Alpha360vwap：基于VWAP的Alpha360<br/><br/>
                     <strong>推荐：</strong> Alpha158（经典因子集，效果稳定）
@@ -129,10 +127,6 @@
               <el-option-group label="经典因子">
                 <el-option label="Alpha158 (158因子)" value="Alpha158" />
                 <el-option label="Alpha360 (360因子)" value="Alpha360" />
-              </el-option-group>
-              <el-option-group label="深度学习因子">
-                <el-option label="Alpha158DL" value="Alpha158DL" />
-                <el-option label="Alpha360DL" value="Alpha360DL" />
               </el-option-group>
               <el-option-group label="VWAP因子">
                 <el-option label="Alpha158vwap" value="Alpha158vwap" />
@@ -149,11 +143,11 @@
                     <strong>模型类型选择</strong><br/>
                     选择用于训练的机器学习模型。<br/><br/>
                     <strong>传统机器学习模型：</strong><br/>
+                    • 双重集成：Qlib benchmark表现最佳，IC=0.0521，年化收益11.58%<br/>
                     • LightGBM：微软开发的高效梯度提升树，速度快、内存占用低<br/>
                     • XGBoost：经典的梯度提升树，精度高但速度较慢<br/>
                     • CatBoost：Yandex开发，对类别特征处理优秀<br/>
-                    • 线性模型：简单的线性回归，适合快速验证<br/>
-                    • 双重集成：双重集成模型，结合多种模型优势<br/><br/>
+                    • 线性模型：简单的线性回归，适合快速验证<br/><br/>
                     <strong>深度学习模型（需要GPU）：</strong><br/>
                     • LSTM：长短期记忆网络，适合时间序列<br/>
                     • GRU：门控循环单元，比LSTM更轻量<br/>
@@ -163,7 +157,7 @@
                     • TCN：时间卷积网络<br/>
                     • SFM：状态频率模型<br/>
                     • TabNet：表格数据神经网络<br/><br/>
-                    <strong>推荐：</strong> LightGBM（量化场景首选）
+                    <strong>推荐：</strong> 双重集成（Qlib官方benchmark表现最佳）
                   </div>
                 </template>
                 <el-icon class="help-icon"><QuestionFilled /></el-icon>
@@ -171,11 +165,11 @@
             </div>
             <el-select v-model="config.model_type" class="config-select">
               <el-option-group label="传统机器学习">
+                <el-option label="DoubleEnsemble (推荐)" value="DEnsembleModel" />
                 <el-option label="LightGBM" value="LGBModel" />
                 <el-option label="XGBoost" value="XGBModel" />
                 <el-option label="CatBoost" value="CatBoostModel" />
-                <el-option label="线性模型" value="Linear" />
-                <el-option label="双重集成" value="DEnsembleModel" />
+                <el-option label="Linear" value="Linear" />
               </el-option-group>
               <el-option-group label="深度学习 (需要GPU)">
                 <el-option label="LSTM" value="LSTM" />
@@ -187,6 +181,30 @@
                 <el-option label="SFM" value="SFM" />
                 <el-option label="TabNet" value="TabnetModel" />
               </el-option-group>
+            </el-select>
+          </div>
+          <div class="config-item" v-if="isDLModel()">
+            <div class="label-with-help">
+              <label class="config-label">特征选择</label>
+              <el-tooltip placement="top" effect="light">
+                <template #content>
+                  <div class="param-tooltip">
+                    <strong>特征选择策略</strong><br/>
+                    选择深度学习模型使用的特征数量。<br/><br/>
+                    <strong>选项说明：</strong><br/>
+                    • 精选20特征：基于LightGBM特征重要性筛选，推荐用于深度学习模型<br/>
+                    • 全部特征：使用全部158/360个特征，可能增加噪声和过拟合风险<br/><br/>
+                    <strong>Qlib最佳实践：</strong><br/>
+                    深度学习模型推荐使用精选20特征，树模型推荐使用全部特征。<br/>
+                    精选特征可减少噪声干扰、降低过拟合风险、加快训练速度。
+                  </div>
+                </template>
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </div>
+            <el-select v-model="config.use_all_features" class="config-select">
+              <el-option label="精选20特征 (推荐)" :value="false" />
+              <el-option label="全部特征" :value="true" />
             </el-select>
           </div>
           <div class="param-slider">
@@ -355,6 +373,53 @@
             <el-slider v-model="config.num_threads" :min="1" :max="16" :step="1" />
           </div>
         </div>
+        
+        <!-- 深度学习模型参数（仅在选择深度学习模型时显示） -->
+        <div v-if="isDLModel()" class="dl-params-section">
+          <div class="section-header">
+            <span class="section-icon">🧠</span>
+            <h4>深度学习模型参数</h4>
+            <span class="params-info">当前模型: {{ config.model_type }}</span>
+          </div>
+          <div class="dl-params-grid">
+            <div class="dl-param-item">
+              <label>隐藏层大小</label>
+              <span class="param-value">{{ currentDLParams.hidden_size }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>网络层数</label>
+              <span class="param-value">{{ currentDLParams.num_layers }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>Dropout</label>
+              <span class="param-value">{{ currentDLParams.dropout }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>训练轮数</label>
+              <span class="param-value">{{ currentDLParams.n_epochs }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>批次大小</label>
+              <span class="param-value">{{ currentDLParams.batch_size }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>早停轮数</label>
+              <span class="param-value">{{ currentDLParams.early_stop }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>学习率</label>
+              <span class="param-value">{{ currentDLParams.lr }}</span>
+            </div>
+            <div class="dl-param-item">
+              <label>时间步长</label>
+              <span class="param-value">{{ currentDLParams.step_len }}</span>
+            </div>
+          </div>
+          <div class="params-note">
+            <el-icon><InfoFilled /></el-icon>
+            <span>参数基于Qlib官方benchmark最佳配置，如需调整请修改源码 dlModelParams</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -392,8 +457,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
+
+// 获取当前日期前一天的日期字符串
+const getYesterdayDate = () => {
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  return yesterday.toISOString().split('T')[0]
+}
+
+const yesterdayDate = getYesterdayDate()
 import axios from 'axios'
 
 const API_BASE_URL = '/api'
@@ -413,17 +488,21 @@ const config = reactive({
   valid_start_date: '',
   valid_end_date: '',
   test_start_date: '',
-  test_end_date: '',
+  test_end_date: yesterdayDate,
   handler_type: 'Alpha158',
-  model_type: 'LGBModel',
-  lr: 0.0421,
+  model_type: 'DEnsembleModel',
+  lr: 0.2,
   max_depth: 8,
   num_leaves: 210,
   subsample: 0.8789,
   colsample_bytree: 0.8879,
   seed: 42,
-  num_threads: 1
+  num_threads: 1,
+  use_all_features: false
 })
+
+const dlModels = ['LSTM', 'GRU', 'ALSTM', 'DNN', 'GATs', 'TCN', 'SFM', 'TabnetModel']
+const isDLModel = () => dlModels.includes(config.model_type)
 
 const marketLabels = {
   csi300: '沪深300',
@@ -437,8 +516,8 @@ const modelLabels = {
   LGBModel: 'LightGBM',
   XGBModel: 'XGBoost',
   CatBoostModel: 'CatBoost',
-  Linear: '线性模型',
-  DEnsembleModel: '双重集成',
+  Linear: 'Linear',
+  DEnsembleModel: 'DoubleEnsemble',
   LSTM: 'LSTM',
   GRU: 'GRU',
   ALSTM: 'ALSTM',
@@ -449,21 +528,120 @@ const modelLabels = {
   TabnetModel: 'TabNet'
 }
 
+// 深度学习模型默认参数配置（基于Qlib官方benchmark最佳参数）
+// GPU优化：batch_size增大可提高GPU利用率
+const dlModelParams = {
+  LSTM: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.0,
+    n_epochs: 200,
+    batch_size: 2000,  // 增大batch_size以提高GPU利用率
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.001
+  },
+  GRU: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.0,
+    n_epochs: 200,
+    batch_size: 2000,  // 增大batch_size以提高GPU利用率
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.0002
+  },
+  ALSTM: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.0,
+    n_epochs: 200,
+    batch_size: 2000,
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.001
+  },
+  DNN: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.0,
+    n_epochs: 200,
+    batch_size: 2000,
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.001
+  },
+  GATs: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.7,
+    n_epochs: 200,
+    batch_size: 2000,
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.0001
+  },
+  TCN: {
+    d_feat: 20,
+    hidden_size: 32,
+    num_layers: 5,
+    dropout: 0.5,
+    n_epochs: 200,
+    batch_size: 2000,
+    early_stop: 20,
+    step_len: 20,
+    lr: 0.0001
+  },
+  SFM: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.0,
+    n_epochs: 200,
+    batch_size: 2000,
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.001
+  },
+  TabnetModel: {
+    d_feat: 20,
+    hidden_size: 64,
+    num_layers: 2,
+    dropout: 0.0,
+    n_epochs: 200,
+    batch_size: 2000,
+    early_stop: 10,
+    step_len: 20,
+    lr: 0.001
+  }
+}
+
+const currentDLParams = computed(() => {
+  return dlModelParams[config.model_type] || dlModelParams.LSTM
+})
+
 const getMarketLabel = (market) => marketLabels[market] || market
 const getModelLabel = (model) => modelLabels[model] || model
 
 onMounted(() => {
   const today = new Date()
-  const oneYearAgo = new Date(today)
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const oneYearAgo = new Date(yesterday)
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
-  const threeMonthsAgo = new Date(today)
+  const threeMonthsAgo = new Date(yesterday)
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
 
   config.train_end_date = formatDate(oneYearAgo)
   config.valid_start_date = formatDate(oneYearAgo)
   config.valid_end_date = formatDate(threeMonthsAgo)
   config.test_start_date = formatDate(threeMonthsAgo)
-  config.test_end_date = formatDate(today)
+  config.test_end_date = formatDate(yesterday)
 })
 
 const formatDate = (date) => date.toISOString().split('T')[0]
@@ -476,10 +654,55 @@ const trainModel = async () => {
   message.value = ''
 
   try {
-    const response = await fetch(`${API_BASE_URL}/qlib/train_stream`, {
+    // 判断是否为深度学习模型
+    const dlModels = ['LSTM', 'GRU', 'ALSTM', 'DNN', 'GATs', 'TCN', 'SFM', 'TabnetModel']
+    const isDLModel = dlModels.includes(config.model_type)
+    
+    let apiUrl
+    let requestBody
+    
+    if (isDLModel) {
+      const modelParams = dlModelParams[config.model_type] || dlModelParams.LSTM
+      
+      const d_feat = config.use_all_features 
+        ? (config.handler_type.includes('360') ? 360 : 158)
+        : modelParams.d_feat
+      
+      apiUrl = `${API_BASE_URL}/dl/train_dl_stream`
+      requestBody = {
+        market: config.market,
+        benchmark: config.benchmark,
+        train_start_date: config.train_start_date,
+        train_end_date: config.train_end_date,
+        valid_start_date: config.valid_start_date,
+        valid_end_date: config.valid_end_date,
+        test_start_date: config.test_start_date,
+        test_end_date: config.test_end_date,
+        model_type: config.model_type,
+        handler_type: config.handler_type,
+        d_feat: d_feat,
+        hidden_size: modelParams.hidden_size,
+        num_layers: modelParams.num_layers,
+        dropout: modelParams.dropout,
+        lr: modelParams.lr,
+        n_epochs: modelParams.n_epochs,
+        batch_size: modelParams.batch_size,
+        early_stop: modelParams.early_stop,
+        step_len: modelParams.step_len,
+        seed: config.seed,
+        GPU: 0,
+        use_all_features: config.use_all_features
+      }
+    } else {
+      // 传统机器学习模型使用原有 API
+      apiUrl = `${API_BASE_URL}/qlib/train_stream`
+      requestBody = config
+    }
+    
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
+      body: JSON.stringify(requestBody)
     })
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
@@ -829,5 +1052,80 @@ const trainModel = async () => {
 
 .message-icon {
   font-size: 20px;
+}
+
+/* 深度学习模型参数区域 */
+.dl-params-section {
+  margin-top: 20px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%);
+  border-radius: 12px;
+  border: 1px solid #d0e3ff;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.section-icon {
+  font-size: 24px;
+}
+
+.section-header h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #3b5998;
+  margin: 0;
+}
+
+.params-info {
+  font-size: 13px;
+  color: #667eea;
+  background: #e8f0fe;
+  padding: 4px 12px;
+  border-radius: 6px;
+}
+
+.dl-params-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.dl-param-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e0e8f0;
+}
+
+.dl-param-item label {
+  font-size: 12px;
+  color: #6b7c93;
+  font-weight: 500;
+}
+
+.dl-param-item .param-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #3b5998;
+}
+
+.params-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #fff8e6;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #8b6914;
 }
 </style>

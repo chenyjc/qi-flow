@@ -36,8 +36,12 @@ class QlibService:
                 qlib.init(provider_uri=self.provider_uri, region=REG_CN)
                 QlibService._qlib_initialized = True
 
-            sqlite_uri = "sqlite:///mlflow.db"
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            mlruns_dir = os.path.join(backend_dir, "mlruns")
+            os.makedirs(mlruns_dir, exist_ok=True)
+            sqlite_uri = f"sqlite:///{os.path.join(mlruns_dir, 'mlflow.db')}"
             R.set_uri(sqlite_uri)
+            print(f"MLflow tracking URI: {sqlite_uri}")
         except Exception as e:
             print(f"Qlib初始化失败: {e}")
             try:
@@ -45,6 +49,12 @@ class QlibService:
                 qlib.init(provider_uri=provider_uri, region=REG_CN)
                 QlibService._qlib_initialized = True
                 print(f"使用绝对路径初始化Qlib成功: {provider_uri}")
+                
+                backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                mlruns_dir = os.path.join(backend_dir, "mlruns")
+                os.makedirs(mlruns_dir, exist_ok=True)
+                sqlite_uri = f"sqlite:///{os.path.join(mlruns_dir, 'mlflow.db')}"
+                R.set_uri(sqlite_uri)
             except Exception as e2:
                 print(f"使用绝对路径初始化Qlib也失败: {e2}")
 
@@ -228,12 +238,19 @@ class QlibService:
             backup_dir = os.path.expanduser("~/.qlib/qlib_data/cn_data_backup")
             temp_file = os.path.join(os.path.expanduser("~/.qlib"), "qlib_bin.tar.gz")
             
-            proxy_url = "http://192.168.71.101:8080"
-            proxy_handler = urllib.request.ProxyHandler({
-                'http': proxy_url,
-                'https': proxy_url
-            })
-            opener = urllib.request.build_opener(proxy_handler)
+            http_proxy = os.environ.get('HTTP_PROXY', '')
+            https_proxy = os.environ.get('HTTPS_PROXY', '')
+            
+            if http_proxy or https_proxy:
+                proxy_handler = urllib.request.ProxyHandler({
+                    'http': http_proxy or https_proxy,
+                    'https': https_proxy or http_proxy
+                })
+                opener = urllib.request.build_opener(proxy_handler)
+                print(f"使用代理: HTTP={http_proxy}, HTTPS={https_proxy}")
+            else:
+                opener = urllib.request.build_opener()
+                print("不使用代理")
             urllib.request.install_opener(opener)
             
             def report_progress(progress, message):
@@ -392,13 +409,13 @@ class QlibService:
     HANDLER_REGISTRY = {
         "Alpha158": "qlib.contrib.data.handler",
         "Alpha360": "qlib.contrib.data.handler",
-        "Alpha158DL": "qlib.contrib.data.handler",
-        "Alpha360DL": "qlib.contrib.data.handler",
+        "Alpha158DL": "qlib.contrib.data.loader",
+        "Alpha360DL": "qlib.contrib.data.loader",
         "Alpha158vwap": "qlib.contrib.data.handler",
         "Alpha360vwap": "qlib.contrib.data.handler",
     }
 
-    def _get_model_config(self, model_type, lr, max_depth, num_leaves, subsample, colsample_bytree, seed, num_threads):
+    def _get_model_config(self, model_type, lr, max_depth, num_leaves, subsample, colsample_bytree, seed, num_threads, handler_type="Alpha158"):
         module_path = self.MODEL_REGISTRY.get(model_type, "qlib.contrib.model.gbdt")
         
         if model_type == "Linear":
@@ -419,11 +436,13 @@ class QlibService:
                 "module_path": module_path,
                 "kwargs": {
                     "loss": "RMSE",
-                    "learning_rate": lr,
-                    "depth": max_depth,
-                    "subsample": subsample,
-                    "random_seed": seed,
+                    "learning_rate": 0.0421,
+                    "max_depth": 6,
+                    "num_leaves": 100,
+                    "subsample": 0.8789,
                     "thread_count": num_threads,
+                    "grow_policy": "Lossguide",
+                    "bootstrap_type": "Poisson",
                 },
             }
         
@@ -432,14 +451,28 @@ class QlibService:
                 "class": "DEnsembleModel",
                 "module_path": module_path,
                 "kwargs": {
+                    "base_model": "gbm",
                     "loss": "mse",
-                    "learning_rate": lr,
+                    "num_models": 3,
+                    "enable_sr": True,
+                    "enable_fs": True,
+                    "alpha1": 1,
+                    "alpha2": 1,
+                    "bins_sr": 10,
+                    "bins_fs": 5,
+                    "decay": 0.5,
+                    "sample_ratios": [0.8, 0.7, 0.6, 0.5, 0.4],
+                    "sub_weights": [1, 1, 1],
+                    "epochs": 28,
+                    "colsample_bytree": colsample_bytree,
+                    "learning_rate": 0.2,
+                    "subsample": subsample,
+                    "lambda_l1": 205.6999,
+                    "lambda_l2": 580.9768,
                     "max_depth": max_depth,
                     "num_leaves": num_leaves,
-                    "subsample": subsample,
-                    "colsample_bytree": colsample_bytree,
-                    "random_state": seed,
                     "num_threads": num_threads,
+                    "verbosity": -1,
                 },
             }
         
@@ -458,11 +491,19 @@ class QlibService:
         
         pytorch_models = ["LSTM", "GRU", "ALSTM", "DNN", "GATs", "TCN", "SFM"]
         if model_type in pytorch_models:
+            # 根据因子类型动态设置 d_feat
+            if "Alpha360" in handler_type:
+                d_feat = 360
+            elif "Alpha158" in handler_type:
+                d_feat = 158
+            else:
+                d_feat = 158  # 默认值
+            
             return {
                 "class": model_type,
                 "module_path": module_path,
                 "kwargs": {
-                    "d_feat": 6,
+                    "d_feat": d_feat,
                     "hidden_size": 64,
                     "num_layers": 2,
                     "dropout": 0.0,
@@ -471,6 +512,21 @@ class QlibService:
                     "batch_size": 800,
                     "early_stopping_rounds": 50,
                     "seed": seed,
+                },
+            }
+        
+        if model_type == "XGBModel":
+            return {
+                "class": "XGBModel",
+                "module_path": module_path,
+                "kwargs": {
+                    "eval_metric": "rmse",
+                    "colsample_bytree": 0.8879,
+                    "eta": 0.0421,
+                    "max_depth": 8,
+                    "n_estimators": 647,
+                    "subsample": 0.8789,
+                    "nthread": num_threads,
                 },
             }
         
@@ -500,7 +556,7 @@ class QlibService:
         """训练模型（带进度回调）"""
         rid = None
         try:
-            progress_callback(0, "开始训练模型...")
+            progress_callback(0, "开始训练...")
 
             progress_callback(10, "配置数据处理参数...")
 
@@ -514,7 +570,7 @@ class QlibService:
 
             progress_callback(20, "构建任务配置...")
 
-            model_config = self._get_model_config(model_type, lr, max_depth, num_leaves, subsample, colsample_bytree, seed, num_threads)
+            model_config = self._get_model_config(model_type, lr, max_depth, num_leaves, subsample, colsample_bytree, seed, num_threads, handler_type)
 
             handler_module_path = self.HANDLER_REGISTRY.get(handler_type, "qlib.contrib.data.handler")
 
@@ -549,7 +605,7 @@ class QlibService:
             progress_callback(50, "开始模型训练...")
             
             current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            train_recorder_name = f"{current_time}_{market}_{train_start_date.replace('-', '')}_to_{train_end_date.replace('-', '')}"
+            train_recorder_name = f"{current_time}_{model_type}_{market}_{train_start_date.replace('-', '')}_to_{train_end_date.replace('-', '')}"
             
             with R.start(experiment_name="train_model", recorder_name=train_recorder_name):
                 R.log_params(
@@ -713,11 +769,39 @@ class QlibService:
                     seed, num_threads, handler_type)
     
     def backtest_model(self, recorder_id, market, benchmark, start_date, end_date,
-                      initial_account, topk, n_drop, hold_days, stop_loss, strategy_type):
-        """执行回测"""
+                      initial_account, topk, n_drop, hold_days, stop_loss, strategy_type, seed=42):
+        """执行回测
+        
+        Parameters
+        ----------
+        seed : int
+            随机种子，确保回测结果可复现（默认42）
+        """
         try:
+            # 设置随机种子，确保回测结果可复现
+            import random
+            import numpy as np
+            random.seed(seed)
+            np.random.seed(seed)
+            
+            try:
+                import torch
+                torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed(seed)
+                    torch.cuda.manual_seed_all(seed)
+            except ImportError:
+                pass
+            
+            print(f"[回测] 设置随机种子: {seed}")
+            
             # 获取指定ID的记录器
             recorder = R.get_recorder(recorder_id=recorder_id, experiment_name="train_model")
+            
+            # 获取训练参数中的model_type
+            train_params = recorder.list_params()
+            model_type = train_params.get('model_type', 'Unknown')
+            print(f"[回测] 使用模型: {model_type}")
 
             # 检查记录器中的对象列表
             try:
@@ -877,9 +961,9 @@ class QlibService:
                 },
             }
             
-            # 生成回测记录名称: 当前日期时间_市场_起止日期
+            # 生成回测记录名称: 当前日期时间_模型_市场_起止日期
             current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            backtest_recorder_name = f"{current_time}_{market}_{start_date.replace('-', '')}_to_{end_date.replace('-', '')}"
+            backtest_recorder_name = f"{current_time}_{model_type}_{market}_{start_date.replace('-', '')}_to_{end_date.replace('-', '')}"
             
             # 执行回测和分析 - 使用 recorder_name 参数指定名称
             with R.start(experiment_name="backtest_analysis", recorder_name=backtest_recorder_name):
@@ -972,9 +1056,10 @@ class QlibService:
             trading_days = pd.to_datetime(trading_days)
             trading_days_before = trading_days[trading_days <= target_date]
             if len(trading_days_before) > n_days:
-                return trading_days_before.iloc[-(n_days + 1)]
+                # 使用 [-n_days-1] 索引，不使用 iloc
+                return trading_days_before[-(n_days + 1)]
             elif len(trading_days_before) > 0:
-                return trading_days_before.iloc[0]
+                return trading_days_before[0]
             else:
                 return target_date - pd.Timedelta(days=n_days)
         except Exception as e:

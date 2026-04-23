@@ -4,6 +4,8 @@
 
 ## 目录
 
+- [系统架构](#系统架构)
+- [特征选择策略](#特征选择策略)
 - [因子类型 (DataHandler)](#因子类型-datahandler)
 - [模型类型](#模型类型)
 - [使用建议](#使用建议)
@@ -11,6 +13,107 @@
 - [评测指标详解](#评测指标详解)
 - [GPU 配置](#gpu-配置)
 - [参考资料](#参考资料)
+
+---
+
+## 系统架构
+
+QiFlow 支持两种训练架构，分别适用于不同类型的模型：
+
+### 架构一：DatasetH + 传统机器学习模型
+
+**适用模型**: LightGBM、XGBoost、CatBoost、Linear、DEnsembleModel
+
+**特点**:
+- 使用 `DatasetH` 作为数据集包装器
+- 使用 `Alpha158`/`Alpha360` 作为特征处理器（DataHandlerLP）
+- 使用全部特征（158个或360个）
+- 适合表格数据的机器学习模型
+
+**API 端点**: `/api/qlib/train_stream`
+
+### 架构二：TSDatasetH + 深度学习模型
+
+**适用模型**: LSTM、GRU、ALSTM
+
+**特点**:
+- 使用 `TSDatasetH` 作为时间序列数据集包装器
+- 使用 `pytorch_lstm_ts`/`pytorch_gru_ts` 等时间序列模型
+- 只使用选定的20个特征（通过 FilterCol 处理器）
+- 需要 `step_len` 参数指定时间序列步长
+- 包含时间序列特征处理器（RobustZScoreNorm、Fillna 等）
+
+**API 端点**: `/api/dl/train_dl_stream`
+
+### 架构对比
+
+| 特性 | 传统机器学习架构 | 深度学习架构 |
+|------|-----------------|-------------|
+| 数据集类 | `DatasetH` | `TSDatasetH` |
+| 特征数量 | 158/360 (全部) | 20 (选定特征) |
+| 数据处理器 | 简单标准化 | 时间序列处理 |
+| 训练速度 | 快 | 较慢 |
+| 适用场景 | 快速迭代、大规模数据 | 时间序列模式捕捉 |
+
+---
+
+## 特征选择策略
+
+QiFlow 根据 Qlib 官方 benchmark 最佳实践，对不同类型的模型采用不同的特征选择策略。
+
+### 特征使用规则
+
+| 模型类型 | 特征数量 | 选择策略 | 原因 |
+|---------|---------|---------|------|
+| **传统机器学习** (LightGBM, XGBoost, CatBoost, Linear, DEnsemble) | **全部特征** (158/360) | 无筛选 | 树模型内置特征重要性评估，能自动处理无关特征 |
+| **深度学习** (LSTM, GRU, ALSTM, DNN, GATs, TCN, SFM, TabNet) | **精选20特征** (默认) | FilterCol 筛选 | 减少噪声干扰、降低过拟合风险、加快训练速度 |
+
+### Qlib 官方 Benchmark 验证
+
+根据 Qlib 官方 benchmark 测试结果，深度学习模型使用精选20特征效果更好：
+
+| 模型 | 特征策略 | IC | ICIR | 年化收益 |
+|------|---------|-----|------|---------|
+| LSTM | 精选20特征 | 0.0318 | 0.2367 | 3.81% |
+| GRU | 精选20特征 | 0.0315 | 0.2450 | 3.44% |
+| ALSTM | 精选20特征 | 0.0362 | 0.2789 | 4.70% |
+| GATs | 精选20特征 | 0.0349 | 0.2511 | 4.97% |
+| LightGBM | 全部158特征 | 0.0448 | 0.3660 | 9.01% |
+| XGBoost | 全部158特征 | 0.0498 | 0.3779 | 7.80% |
+| CatBoost | 全部158特征 | 0.0481 | 0.3366 | 7.65% |
+
+> **来源**: [Qlib Benchmarks](https://github.com/microsoft/qlib/tree/main/examples/benchmarks)
+
+### 精选20特征列表
+
+深度学习模型默认使用的20个特征（基于 LightGBM 特征重要性筛选）：
+
+```
+RESI5, WVMA5, RSQR5, KLEN, RSQR10, CORR5, CORD5, CORR10,
+ROC60, RESI10, VSTD5, RSQR60, CORR60, WVMA60, STD5,
+RSQR20, CORD60, CORD10, CORR20, KLOW
+```
+
+**特征含义**:
+- `RESI5/10/20/60`: 残差因子（不同时间窗口）
+- `WVMA5/60`: 加权成交量移动平均
+- `RSQR5/10/20/60`: R平方因子
+- `KLEN`: K线长度因子
+- `CORR5/10/20/60`: 相关性因子
+- `CORD5/10/60`: 相关性衍生因子
+- `ROC60`: 60日收益率变化率
+- `VSTD5`: 成交量标准差
+- `STD5`: 价格标准差
+- `KLOW`: K线低位因子
+
+### 前端特征选择开关
+
+在训练页面，选择深度学习模型后会出现"特征选择"开关：
+
+- **精选20特征 (推荐)**: 使用上述20个高重要性特征
+- **全部特征**: 使用全部158/360个特征（可能增加噪声和过拟合风险）
+
+> **注意**: 传统机器学习模型始终使用全部特征，无此开关选项。
 
 ---
 
@@ -22,12 +125,12 @@
 
 | 因子类 | 因子数量 | 适用场景 | 特点 |
 |--------|----------|----------|------|
-| Alpha158 | 158 | 传统机器学习 | 经典因子集，效果稳定 |
-| Alpha360 | 360 | 传统机器学习 | 特征更丰富，计算量更大 |
-| Alpha158DL | 158 | 深度学习 | 专为神经网络优化 |
-| Alpha360DL | 360 | 深度学习 | 专为神经网络优化 |
+| Alpha158 | 158 | 所有模型 | 经典因子集，效果稳定 |
+| Alpha360 | 360 | 所有模型 | 特征更丰富，计算量更大 |
 | Alpha158vwap | 158 | VWAP策略 | 基于成交量加权均价 |
 | Alpha360vwap | 360 | VWAP策略 | 基于成交量加权均价 |
+
+> **注意**: Alpha158DL 和 Alpha360DL 是 QlibDataLoader 类型，与当前 DatasetH 架构不兼容，因此未在界面中提供。
 
 ### 详细说明
 
@@ -38,7 +141,7 @@
 **特点**:
 - 158个经典 Alpha 因子
 - 包含技术指标、价格动量、成交量等特征
-- 适合 LightGBM、XGBoost 等传统机器学习模型
+- **适合所有模型类型**（传统机器学习和深度学习）
 - 计算速度快，内存占用低
 
 **因子类别**:
@@ -48,6 +151,10 @@
 - 成交量因子：成交量变化、量价关系等
 
 **推荐场景**: 日常量化策略训练，快速验证想法
+
+**与深度学习模型配合**:
+- Alpha158 可以与 LSTM、GRU、ALSTM 等深度学习模型配合使用
+- 系统会自动根据因子数量设置模型的 `d_feat` 参数（158）
 
 #### Alpha360（扩展因子集）
 
@@ -67,17 +174,9 @@
 
 **推荐场景**: 追求更高精度，有充足计算资源
 
-#### Alpha158DL / Alpha360DL（深度学习版本）
-
-**模块路径**: `qlib.contrib.data.handler`
-
-**特点**:
-- 专为深度学习模型优化
-- 数据预处理更适合神经网络
-- 支持序列化输入格式
-- 配合 LSTM、GRU 等模型效果更好
-
-**推荐场景**: 使用深度学习模型（LSTM、GRU、ALSTM 等）
+**与深度学习模型配合**:
+- Alpha360 同样可以与 LSTM、GRU、ALSTM 等深度学习模型配合使用
+- 系统会自动根据因子数量设置模型的 `d_feat` 参数（360）
 
 #### Alpha158vwap / Alpha360vwap（VWAP版本）
 
@@ -100,6 +199,32 @@ QiFlow 支持两大类模型：传统机器学习模型和深度学习模型。
 ### 传统机器学习模型
 
 这些模型不需要 GPU，计算效率高，适合快速迭代。
+
+#### 传统机器学习模型官方最佳参数配置
+
+以下参数基于 Qlib 官方 benchmark 测试验证的最佳配置：
+
+| 模型 | learning_rate | max_depth | num_leaves | subsample | colsample_bytree | 其他参数 |
+|------|---------------|-----------|------------|-----------|------------------|----------|
+| **LightGBM** | **0.2** | 8 | 210 | 0.8789 | 0.8879 | lambda_l1=205.6999, lambda_l2=580.9768 |
+| **XGBoost** | 0.0421 | 8 | - | 0.8789 | 0.8879 | n_estimators=647 |
+| **CatBoost** | 0.0421 | **6** | **100** | 0.8789 | - | grow_policy=Lossguide, bootstrap_type=Poisson |
+| **DoubleEnsemble** | 0.2 | 8 | 210 | 0.8789 | 0.8879 | num_models=3, decay=0.5, epochs=28 |
+
+> **来源**: [Qlib Benchmarks - LightGBM](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml) | [XGBoost](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/XGBoost/workflow_config_xgboost_Alpha158.yaml) | [CatBoost](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/CatBoost/workflow_config_catboost_Alpha158.yaml) | [DoubleEnsemble](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/DoubleEnsemble/workflow_config_doubleensemble_Alpha158.yaml)
+
+**关键参数说明**:
+- `learning_rate`: LightGBM 使用较高的0.2，XGBoost/CatBoost 使用0.0421
+- `max_depth`: CatBoost 使用较小的6，其他模型使用8
+- `num_leaves`: LightGBM/DoubleEnsemble 使用210，CatBoost 使用100
+- `subsample`: 统一使用0.8789
+- `colsample_bytree`: 统一使用0.8879（CatBoost 不支持此参数）
+
+**注意事项**:
+- LightGBM 的官方最佳 learning_rate 是 **0.2**，不是常见的0.0421
+- CatBoost 需要设置 `bootstrap_type=Poisson` 才能使用 subsample 参数
+- CatBoost 使用 `grow_policy=Lossguide` 控制树的生长方式
+- DoubleEnsemble 是基于 LightGBM 的集成框架，继承其基础参数
 
 #### LightGBM (LGBModel)
 
@@ -195,15 +320,92 @@ QiFlow 支持两大类模型：传统机器学习模型和深度学习模型。
 
 这些模型需要 GPU 支持，适合处理时间序列数据。
 
+> **重要**: 深度学习模型使用 `Alpha158` 或 `Alpha360` 因子，系统会自动根据因子数量设置 `d_feat` 参数（158 或 360）。不需要选择 DL 版本的因子。
+
+#### 深度学习模型官方最佳参数配置
+
+以下参数基于 Qlib 官方 benchmark 测试验证的最佳配置：
+
+| 模型 | d_feat | hidden_size | num_layers | dropout | n_epochs | batch_size | early_stop | lr | step_len |
+|------|--------|-------------|------------|---------|----------|------------|-------------|-----|----------|
+| **LSTM** | 20 | 64 | 2 | 0.0 | 200 | 800 | 10 | 0.001 | 20 |
+| **GRU** | 20 | 64 | 2 | 0.0 | 200 | 800 | 10 | 0.0002 | 20 |
+| **ALSTM** | 20 | 64 | 2 | 0.0 | 200 | 800 | 10 | 0.001 | 20 |
+| **GATs** | 20 | 64 | 2 | **0.7** | 200 | 800 | 10 | 0.0001 | 20 |
+| **TCN** | 20 | **32** | **5** | **0.5** | 200 | **2000** | 20 | 0.0001 | 20 |
+
+> **来源**: [Qlib Benchmarks - LSTM](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/LSTM/workflow_config_lstm_Alpha158.yaml) | [GRU](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/GRU/workflow_config_gru_Alpha158.yaml) | [ALSTM](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/ALSTM/workflow_config_alstm_Alpha158.yaml) | [GATs](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/GATs/workflow_config_gats_Alpha158.yaml) | [TCN](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/TCN/workflow_config_tcn_Alpha158.yaml)
+
+**关键参数说明**:
+- `d_feat`: 特征维度，深度学习模型推荐使用精选20特征
+- `hidden_size`: 隐藏层大小，TCN 使用较小的32
+- `num_layers`: 网络层数，TCN 使用5层
+- `dropout`: Dropout 比例，**GATs 使用非常高的0.7**，这是官方验证的最佳值
+- `n_epochs`: 训练轮数，统一使用200
+- `batch_size`: 批次大小，TCN 使用较大的2000
+- `early_stop`: 早停轮数，防止过拟合
+- `lr`: 学习率，GRU 和 GATs/TCN 使用较低的学习率
+- `step_len`: 时间序列步长，统一使用20
+
+**注意事项**:
+- GATs 的 dropout=0.7 看起来很高，但这是官方 benchmark 验证的最佳值
+- TCN 使用特殊的参数结构（n_chans=32, kernel_size=7）
+- GRU 的学习率比 LSTM 低一个数量级（0.0002 vs 0.001）
+
+#### GPU利用率优化建议
+
+如果训练时GPU利用率低（CPU狂飙但GPU空闲），可能的原因和解决方案：
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| **DataLoader瓶颈** | n_jobs太高导致CPU被数据预处理占满，GPU等待数据 | 设置 `n_jobs=0`（单进程）或 `n_jobs=2-4` |
+| **batch_size太小** | 每批次数据量不足以充分利用GPU | 增大 `batch_size`（如2000） |
+| **模型未移到GPU** | Qlib模型未正确调用 `.to(device)` | 检查日志中的 `device` 输出应为 `cuda:0` |
+
+**调试步骤**:
+
+1. **检查模型设备**：查看训练日志，确认输出类似：
+   ```
+   device : cuda:0
+   use_GPU : True
+   ```
+
+2. **监控GPU利用率**：在另一个终端运行：
+   ```bash
+   # Linux
+   watch -n 1 nvidia-smi
+   
+   # Windows PowerShell
+   while ($true) { cls; nvidia-smi; Start-Sleep -Seconds 1 }
+   ```
+
+3. **调整参数**：
+   - 先设置 `n_jobs=0`，观察GPU是否启动
+   - 如果GPU启动但利用率低，增大 `batch_size`
+   - 如果CPU仍有瓶颈，可尝试 `n_jobs=2-4`
+
+**QiFlow默认配置**:
+- `n_jobs=0`：单进程DataLoader，避免CPU瓶颈
+- `batch_size=800`：官方LSTM/GRU配置
+- `GPU=0`：使用第一个GPU
+
+> **来源**: [PyTorch GPU利用率低排查指南](https://wenku.csdn.net/doc/2i9097q4fv) | [Qlib pytorch_lstm_ts源码](https://github.com/microsoft/qlib/blob/main/qlib/contrib/model/pytorch_lstm_ts.py)
+
 #### LSTM（长短期记忆网络）
 
-**模块路径**: `qlib.contrib.model.pytorch_lstm`
+**模块路径**: `qlib.contrib.model.pytorch_lstm_ts`
 
 **特点**:
 - 专门处理时间序列数据
 - 能够捕捉长期依赖关系
 - 适合股票价格预测
 - 对序列模式敏感
+
+**配置参数**:
+- `d_feat`: 自动根据因子类型设置（Alpha158→158, Alpha360→360）
+- `hidden_size`: 64
+- `num_layers`: 2
+- `n_epochs`: 200
 
 **优势**:
 - 记忆能力强，捕捉长期趋势
@@ -333,7 +535,7 @@ QiFlow 支持两大类模型：传统机器学习模型和深度学习模型。
 |------|----------|------|
 | 日常训练 | Alpha158 | 效果稳定，计算快 |
 | 追求精度 | Alpha360 | 特征丰富 |
-| 深度学习 | Alpha158DL/Alpha360DL | 专为神经网络优化 |
+| 深度学习 | Alpha158/Alpha360 | 适合所有模型 |
 | VWAP策略 | Alpha158vwap | 关注成交量 |
 | 快速验证 | Alpha158 | 计算速度快 |
 
@@ -343,7 +545,7 @@ QiFlow 支持两大类模型：传统机器学习模型和深度学习模型。
 |------|----------|------|
 | 日常量化 | LightGBM | 速度快，效果好 |
 | 追求精度 | XGBoost/CatBoost | 精度高 |
-| 时间序列 | LSTM/GRU | 捕捉时间依赖 |
+| 时间序列 | LSTM/GRU/ALSTM | 捕捉时间依赖 |
 | 快速验证 | 线性模型 | 计算最快 |
 | 行业轮动 | GATs | 捕捉关联关系 |
 | 稳健收益 | DEnsembleModel | 集成降低风险 |
@@ -352,11 +554,12 @@ QiFlow 支持两大类模型：传统机器学习模型和深度学习模型。
 
 | 因子类型 | 推荐模型 | 原因 |
 |----------|----------|------|
-| Alpha158 | LightGBM/XGBoost | 传统因子适合传统模型 |
-| Alpha360 | LightGBM/CatBoost | 特征多需要强模型 |
-| Alpha158DL | LSTM/GRU | 深度学习因子配深度学习模型 |
-| Alpha360DL | ALSTM/GATs | 复杂因子需要复杂模型 |
+| Alpha158 | LightGBM/XGBoost/LSTM/GRU | 经典因子适合所有模型 |
+| Alpha360 | LightGBM/CatBoost/ALSTM | 特征丰富，适合复杂模型 |
 | Alpha158vwap | 任意模型 | VWAP因子通用性强 |
+| Alpha360vwap | 任意模型 | VWAP因子通用性强 |
+
+> **注意**: 系统会根据选择的因子类型自动设置深度学习模型的 `d_feat` 参数，无需手动配置。
 
 ---
 
@@ -685,6 +888,7 @@ print(torch.cuda.get_device_name(0))  # 应显示 GPU 名称
 
 - [Qlib 官方文档](https://qlib.readthedocs.io/)
 - [Qlib GitHub](https://github.com/microsoft/qlib)
+- [Qlib Benchmarks - 模型性能对比](https://github.com/microsoft/qlib/tree/main/examples/benchmarks)
 - [LightGBM 文档](https://lightgbm.readthedocs.io/)
 - [XGBoost 文档](https://xgboost.readthedocs.io/)
 - [CatBoost 文档](https://catboost.ai/docs/)

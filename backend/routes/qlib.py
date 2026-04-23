@@ -76,6 +76,7 @@ class BacktestRequest(BaseModel):
     hold_days: int = 3
     stop_loss: float = 5.0
     strategy_type: str = "TopkDropoutStrategy"
+    seed: int = 42  # 随机种子，确保回测结果可复现
 
 @router.get("/check_data_release")
 async def check_data_release():
@@ -265,7 +266,8 @@ async def backtest_model(request: BacktestRequest):
             n_drop=request.n_drop,
             hold_days=request.hold_days,
             stop_loss=request.stop_loss,
-            strategy_type=request.strategy_type
+            strategy_type=request.strategy_type,
+            seed=request.seed
         )
         return result
     except Exception as e:

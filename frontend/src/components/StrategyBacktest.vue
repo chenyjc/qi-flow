@@ -153,7 +153,8 @@ const config = reactive({
   hold_days: 3,
   stop_loss: 5,
   strategy_type: 'TopkDropoutStrategy',
-  recorder_id: ''
+  recorder_id: '',
+  seed: 42  // 随机种子，确保回测结果可复现
 })
 
 onMounted(() => {
@@ -163,10 +164,12 @@ onMounted(() => {
 
 const initDates = () => {
   const today = new Date()
-  const threeMonthsAgo = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const threeMonthsAgo = new Date(yesterday)
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
   config.start_date = formatDate(threeMonthsAgo)
-  config.end_date = formatDate(today)
+  config.end_date = formatDate(yesterday)
 }
 
 const formatDate = (d) => d.toISOString().split('T')[0]

@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from .routes import stock, qlib
+from .routes import stock, qlib, dl_models
 import os
 import logging
 
@@ -46,6 +46,7 @@ app.add_middleware(
 # stock 路由已被弃用，建议迁移到 qlib 路由
 app.include_router(stock.router, prefix="/api/stock", tags=["stock (Deprecated)"])
 app.include_router(qlib.router, prefix="/api/qlib", tags=["qlib"])
+app.include_router(dl_models.router, prefix="/api/dl", tags=["deep_learning"])
 
 # 配置静态文件服务
 static_dir = os.path.join(os.path.dirname(__file__), "static")
