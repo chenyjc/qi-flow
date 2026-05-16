@@ -69,11 +69,11 @@ class QlibService:
             print(f"释放Qlib资源失败: {e}")
     
     def init_stock_db(self):
-        """初始化股票信息数据库"""
+        """初始化股票信息数据库，并确保表结构与当前版本一致"""
         DB_FILE = os.path.join(os.path.dirname(__file__), 'stock_info.db')
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS stock_info (
             code TEXT NOT NULL,
@@ -83,7 +83,31 @@ class QlibService:
             PRIMARY KEY (code, market)
         )
         ''')
-        
+
+        # 兼容旧版本表结构：若缺少 market 列则迁移
+        cursor.execute("PRAGMA table_info(stock_info)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if 'market' not in existing_columns:
+            logger.info("stock_info 表缺少 market 列，执行迁移...")
+            cursor.execute("ALTER TABLE stock_info ADD COLUMN market TEXT NOT NULL DEFAULT ''")
+            # 重建主键约束需重建表
+            cursor.execute('''
+            CREATE TABLE stock_info_new (
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                market TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (code, market)
+            )
+            ''')
+            cursor.execute('''
+            INSERT INTO stock_info_new (code, name, market, updated_at)
+            SELECT code, name, market, updated_at FROM stock_info
+            ''')
+            cursor.execute("DROP TABLE stock_info")
+            cursor.execute("ALTER TABLE stock_info_new RENAME TO stock_info")
+            logger.info("stock_info 表迁移完成")
+
         conn.commit()
         conn.close()
     
@@ -423,10 +447,8 @@ class QlibService:
                 "class": "LinearModel",
                 "module_path": module_path,
                 "kwargs": {
-                    "estimator": "ols",
-                    "alpha": 0.0,
-                    "fit_intercept": False,
-                    "include_valid": False,
+                    "estimator": "ridge",
+                    "alpha": 0.05,
                 },
             }
         
@@ -436,10 +458,10 @@ class QlibService:
                 "module_path": module_path,
                 "kwargs": {
                     "loss": "RMSE",
-                    "learning_rate": 0.0421,
-                    "max_depth": 6,
-                    "num_leaves": 100,
-                    "subsample": 0.8789,
+                    "learning_rate": lr,
+                    "max_depth": max_depth,
+                    "num_leaves": num_leaves,
+                    "subsample": subsample,
                     "thread_count": num_threads,
                     "grow_policy": "Lossguide",
                     "bootstrap_type": "Poisson",
@@ -521,11 +543,11 @@ class QlibService:
                 "module_path": module_path,
                 "kwargs": {
                     "eval_metric": "rmse",
-                    "colsample_bytree": 0.8879,
-                    "eta": 0.0421,
-                    "max_depth": 8,
+                    "colsample_bytree": colsample_bytree,
+                    "eta": lr,
+                    "max_depth": max_depth,
                     "n_estimators": 647,
-                    "subsample": 0.8789,
+                    "subsample": subsample,
                     "nthread": num_threads,
                 },
             }
@@ -540,8 +562,6 @@ class QlibService:
             "max_depth": max_depth,
             "num_leaves": num_leaves,
             "num_threads": num_threads,
-            "random_state": seed,
-            "deterministic": True,
         }
         return {
             "class": model_type,
@@ -549,16 +569,45 @@ class QlibService:
             "kwargs": kwargs,
         }
 
+    @staticmethod
+    def _build_label_config(label_horizon=1):
+        """构建标签配置，支持多周期预测
+
+        采用 Qlib benchmarks_dynamic 标准公式:
+            Ref($close, -(horizon+1)) / Ref($close, -1) - 1
+        即从下一个交易日收盘到 horizon+1 天后收盘的收益率，
+        避免使用当天收盘价（可能存在信息泄露）。
+
+        Parameters
+        ----------
+        label_horizon : int
+            预测周期（天），1=次日收益率，5=周收益率，20=月收益率
+
+        Returns
+        -------
+        list : Qlib handler labels 配置
+        """
+        if label_horizon <= 1:
+            return None  # 使用 handler 默认标签 (Ref($close,-2)/$close(-1)-1)
+        # 格式匹配官方 Rolling.basic_task() (qlib/contrib/rolling/base.py L171-173):
+        # 单层 list，只包含表达式字符串，名称由 handler 自动推导
+        return ["Ref($close, -%d) / Ref($close, -1) - 1" % (label_horizon + 1)]
+
     def train_model_with_progress(self, progress_callback, market, benchmark, train_start_date, train_end_date,
                     valid_start_date, valid_end_date, test_start_date, test_end_date,
                     model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
-                    seed=42, num_threads=1, handler_type="Alpha158"):
+                    seed=42, num_threads=1, handler_type="Alpha158", label_horizon=1):
         """训练模型（带进度回调）"""
         rid = None
         try:
             progress_callback(0, "开始训练...")
 
-            progress_callback(10, "配置数据处理参数...")
+            horizon_label = f"（{label_horizon}日收益率）" if label_horizon > 1 else ""
+            progress_callback(10, f"配置数据处理参数...{horizon_label}")
+
+            # 官方 LGBModel YAML 不使用自定义 processors，由 Alpha158 handler 使用默认处理
+            # 只有 Linear 和 DL 模型需要自定义 processors（RobustZScoreNorm + CSRankNorm）
+            is_tree_model = model_type in ("LGBModel", "XGBModel", "CatBoostModel", "DEnsembleModel")
 
             data_handler_config = {
                 "start_time": train_start_date,
@@ -567,6 +616,22 @@ class QlibService:
                 "fit_end_time": train_end_date,
                 "instruments": market,
             }
+
+            if not is_tree_model:
+                # Linear / DL 模型需要自定义 processors（参考官方 linear YAML）
+                data_handler_config["infer_processors"] = [
+                    {"class": "RobustZScoreNorm", "kwargs": {"fields_group": "feature", "clip_outlier": True}},
+                    {"class": "Fillna", "kwargs": {"fields_group": "feature"}},
+                ]
+                data_handler_config["learn_processors"] = [
+                    {"class": "DropnaLabel"},
+                    {"class": "CSRankNorm", "kwargs": {"fields_group": "label"}},
+                ]
+
+            # 多周期标签：覆盖 handler 默认的次日收益率
+            label_config = self._build_label_config(label_horizon)
+            if label_config is not None:
+                data_handler_config["label"] = label_config
 
             progress_callback(20, "构建任务配置...")
 
@@ -601,6 +666,14 @@ class QlibService:
             progress_callback(40, "初始化数据集...")
             
             dataset = init_instance_by_config(task["dataset"])
+
+            # 提取特征列名，用于后续因子重要性展示
+            feature_names = []
+            try:
+                train_features = dataset.prepare("train", col_set="feature")
+                feature_names = list(train_features.columns)
+            except Exception:
+                pass
             
             progress_callback(50, "开始模型训练...")
             
@@ -621,6 +694,7 @@ class QlibService:
                     fit_end_time=train_end_date,
                     handler_type=handler_type,
                     model_type=model_type,
+                    label_horizon=label_horizon,
                     lr=lr,
                     max_depth=max_depth,
                     num_leaves=num_leaves,
@@ -658,9 +732,9 @@ class QlibService:
 
                 metrics = {
                     "IC": float(ic.mean()),
-                    "ICIR": float(ic.mean() / ic.std()),
+                    "ICIR": float(ic.mean() / ic.std()) if ic.std() != 0 else 0,
                     "Rank_IC": float(ric.mean()),
-                    "Rank_ICIR": float(ric.mean() / ric.std()),
+                    "Rank_ICIR": float(ric.mean() / ric.std()) if ric.std() != 0 else 0,
                     "Long_precision": float(long_pre.mean()),
                     "Short_precision": float(short_pre.mean()),
                     "Long_Short_Avg_Return": float(long_short_r.mean()),
@@ -738,6 +812,10 @@ class QlibService:
 
                 recorder.save_objects(trained_model=model)
 
+                # 保存特征列名（供因子重要性展示使用）
+                if feature_names:
+                    recorder.save_objects(feature_names=feature_names)
+
                 import os
                 import pickle
 
@@ -761,21 +839,298 @@ class QlibService:
     def train_model(self, market, benchmark, train_start_date, train_end_date,
                     valid_start_date, valid_end_date, test_start_date, test_end_date,
                     model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
-                    seed=42, num_threads=1, handler_type="Alpha158"):
+                    seed=42, num_threads=1, handler_type="Alpha158", label_horizon=1):
         """训练模型"""
-        return self.train_model_with_progress(None, market, benchmark, train_start_date, train_end_date,
+        def noop_callback(progress, message):
+            pass
+        return self.train_model_with_progress(noop_callback, market, benchmark, train_start_date, train_end_date,
                     valid_start_date, valid_end_date, test_start_date, test_end_date,
                     model_type, lr, max_depth, num_leaves, subsample, colsample_bytree,
-                    seed, num_threads, handler_type)
+                    seed, num_threads, handler_type, label_horizon)
+
+    def train_rolling_with_progress(self, progress_callback, market, benchmark,
+                                     train_start_date, train_end_date,
+                                     test_start_date, test_end_date,
+                                     model_type, lr, max_depth, num_leaves,
+                                     subsample, colsample_bytree, seed=42,
+                                     num_threads=1, handler_type="Alpha158",
+                                     label_horizon=5, rolling_step=20):
+        """滚动重训练：按 rolling_step 滑动窗口多次训练并合并预测
+
+        原理参考 Qlib benchmarks_dynamic / Rolling Retrain (RR):
+        - 将测试期按 rolling_step（默认20交易日≈1个月）切片
+        - 每个切片都用截止到该时间点的最新数据重新训练模型
+        - 合并所有切片预测，计算整体 IC/ICIR
+        - 这是 IC 从 ~0.04 提升到 ~0.09 的最大贡献因素
+
+        Parameters
+        ----------
+        rolling_step : int
+            滚动步长（交易日数），默认20（约1个月）
+        label_horizon : int
+            预测周期，滚动训练建议使用 20（月度）以获得最高 IC
+        """
+        try:
+            progress_callback(0, "初始化滚动训练...")
+
+            # 获取测试期间的交易日历
+            trading_days = D.calendar(freq="day",
+                                       start_time=test_start_date,
+                                       end_time=test_end_date)
+            trading_days = pd.to_datetime(trading_days)
+
+            if len(trading_days) < rolling_step:
+                return {"success": False,
+                        "message": f"测试期间交易日不足 {rolling_step} 天，无法滚动训练"}
+
+            # 按 rolling_step 切分测试期
+            n_rolls = len(trading_days) // rolling_step
+            if n_rolls == 0:
+                n_rolls = 1
+
+            progress_callback(5, f"规划滚动窗口：{n_rolls} 轮，每轮 {rolling_step} 交易日")
+
+            all_preds = []
+            all_labels = []
+            all_ics = []
+            all_rics = []
+            last_rid = None
+
+            handler_module_path = self.HANDLER_REGISTRY.get(handler_type, "qlib.contrib.data.handler")
+            model_config = self._get_model_config(model_type, lr, max_depth, num_leaves,
+                                                   subsample, colsample_bytree, seed,
+                                                   num_threads, handler_type)
+            label_config = self._build_label_config(label_horizon)
+
+            for i in range(n_rolls):
+                roll_start_idx = i * rolling_step
+                roll_end_idx = min((i + 1) * rolling_step - 1, len(trading_days) - 1)
+                roll_test_start = trading_days[roll_start_idx].strftime('%Y-%m-%d')
+                roll_test_end = trading_days[roll_end_idx].strftime('%Y-%m-%d')
+
+                # 训练数据结束到该滚动窗口之前
+                # 留出 label_horizon + 1 天作为截断，防止未来信息泄露
+                trunc_days = label_horizon + 1
+                roll_train_end_dt = trading_days[roll_start_idx] - pd.Timedelta(days=trunc_days + 5)
+                roll_train_end = roll_train_end_dt.strftime('%Y-%m-%d')
+
+                pct_base = int(5 + (i / n_rolls) * 80)
+                progress_callback(pct_base,
+                                   f"滚动训练 [{i+1}/{n_rolls}] "
+                                   f"训练至 {roll_train_end} → 测试 {roll_test_start}~{roll_test_end}")
+
+                is_tree_model = model_type in ("LGBModel", "XGBModel", "CatBoostModel", "DEnsembleModel")
+
+                data_handler_config = {
+                    "start_time": train_start_date,
+                    "end_time": roll_test_end,
+                    "fit_start_time": train_start_date,
+                    "fit_end_time": roll_train_end,
+                    "instruments": market,
+                }
+
+                if not is_tree_model:
+                    data_handler_config["infer_processors"] = [
+                        {"class": "RobustZScoreNorm", "kwargs": {"fields_group": "feature", "clip_outlier": True}},
+                        {"class": "Fillna", "kwargs": {"fields_group": "feature"}},
+                    ]
+                    data_handler_config["learn_processors"] = [
+                        {"class": "DropnaLabel"},
+                        {"class": "CSRankNorm", "kwargs": {"fields_group": "label"}},
+                    ]
+
+                if label_config is not None:
+                    data_handler_config["label"] = label_config
+
+                # 计算验证集：取训练期最后 20% 作为验证
+                roll_train_start_dt = pd.Timestamp(train_start_date)
+                roll_train_end_dt2 = pd.Timestamp(roll_train_end)
+                train_duration = (roll_train_end_dt2 - roll_train_start_dt).days
+                valid_duration = max(int(train_duration * 0.2), 60)  # 至少60天
+                roll_valid_start_dt = roll_train_end_dt2 - pd.Timedelta(days=valid_duration)
+                roll_valid_start = roll_valid_start_dt.strftime('%Y-%m-%d')
+
+                task = {
+                    "model": model_config,
+                    "dataset": {
+                        "class": "DatasetH",
+                        "module_path": "qlib.data.dataset",
+                        "kwargs": {
+                            "handler": {
+                                "class": handler_type,
+                                "module_path": handler_module_path,
+                                "kwargs": data_handler_config,
+                            },
+                            "segments": {
+                                "train": (train_start_date, roll_valid_start),
+                                "valid": (roll_valid_start, roll_train_end),
+                                "test": (roll_test_start, roll_test_end),
+                            },
+                        },
+                    },
+                }
+
+                # 确保每轮开始前没有遗留的 MLflow run
+                try:
+                    import mlflow
+                    mlflow.end_run()
+                except Exception:
+                    pass
+
+                try:
+                    current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    roll_rec_name = (f"{current_time}_{model_type}_rolling_{i+1}of{n_rolls}_"
+                                     f"{market}_{roll_test_start.replace('-', '')}")
+
+                    # 与普通训练相同的模式：所有操作都在 R.start() 内部
+                    with R.start(experiment_name="train_model", recorder_name=roll_rec_name):
+                        R.log_params(
+                            market=market, benchmark=benchmark,
+                            train_start_date=train_start_date,
+                            train_end_date=roll_train_end,
+                            test_start_date=roll_test_start,
+                            test_end_date=roll_test_end,
+                            fit_start_time=train_start_date,
+                            fit_end_time=roll_train_end,
+                            handler_type=handler_type,
+                            model_type=model_type,
+                            label_horizon=label_horizon,
+                            rolling_step=rolling_step,
+                            rolling_index=i+1,
+                            rolling_total=n_rolls,
+                            rolling_rounds=n_rolls,
+                            valid_start_date=roll_valid_start,
+                            valid_end_date=roll_train_end,
+                            is_rolling="true",
+                        )
+
+                        recorder = R.get_recorder()
+                        last_rid = recorder.id
+
+                        model = init_instance_by_config(task["model"])
+                        dataset = init_instance_by_config(task["dataset"])
+                        model.fit(dataset)
+
+                        sr = SignalRecord(model, dataset, recorder)
+                        sr.generate()
+
+                        sar = SigAnaRecord(recorder)
+                        sar.generate()
+
+                        recorder.save_objects(trained_model=model)
+
+                        # 保存特征列名（供因子重要性展示）
+                        try:
+                            train_features = dataset.prepare("train", col_set="feature")
+                            recorder.save_objects(feature_names=list(train_features.columns))
+                        except Exception:
+                            pass
+
+                        # 收集该窗口的预测
+                        pred = recorder.load_object("pred.pkl")
+                        label_obj = recorder.load_object("label.pkl")
+
+                        all_preds.append(pred)
+                        all_labels.append(label_obj)
+
+                        from qlib.workflow.record_temp import calc_ic
+                        ic, ric = calc_ic(pred.iloc[:, 0], label_obj.iloc[:, 0])
+                        all_ics.append(ic)
+                        all_rics.append(ric)
+
+                        progress_callback(
+                            pct_base + int(80 / n_rolls),
+                            f"  轮 {i+1} IC={float(ic.mean()):.4f}"
+                        )
+
+                except Exception as e:
+                    logger.warning(f"滚动轮 {i+1} 训练失败: {e}")
+                    progress_callback(pct_base, f"  轮 {i+1} 失败: {str(e)[:50]}")
+                finally:
+                    # 确保每轮结束后 MLflow run 被关闭
+                    try:
+                        import mlflow
+                        mlflow.end_run()
+                    except Exception:
+                        pass
+
+            if not all_preds:
+                progress_callback(-1, "所有滚动窗口训练均失败")
+                return {"success": False, "message": "所有滚动窗口训练均失败"}
+
+            # 合并所有滚动预测并计算整体指标
+            progress_callback(88, "合并滚动预测，计算整体指标...")
+
+            combined_pred = pd.concat(all_preds)
+            combined_label = pd.concat(all_labels)
+            # 去重（取最后一次的预测）
+            combined_pred = combined_pred[~combined_pred.index.duplicated(keep='last')]
+            combined_label = combined_label[~combined_label.index.duplicated(keep='last')]
+
+            aligned = pd.concat([combined_pred, combined_label], axis=1, join='inner')
+            aligned.columns = ['score', 'label']
+
+            from qlib.workflow.record_temp import calc_ic
+            final_ic, final_ric = calc_ic(aligned['score'], aligned['label'])
+
+            rolling_metrics = {
+                "IC": float(final_ic.mean()),
+                "ICIR": float(final_ic.mean() / final_ic.std()) if final_ic.std() != 0 else 0,
+                "Rank_IC": float(final_ric.mean()),
+                "Rank_ICIR": float(final_ric.mean() / final_ric.std()) if final_ric.std() != 0 else 0,
+                "rolling_rounds": n_rolls,
+                "rolling_step": rolling_step,
+            }
+
+            # 将合并后的预测和标签写回最后一轮的 recorder，
+            # 这样评估界面 (get_train_result) 能读取到整体滚动指标
+            try:
+                last_recorder = R.get_recorder(recorder_id=last_rid, experiment_name="train_model")
+                # 构造与原格式兼容的 DataFrame
+                save_pred = aligned[['score']].copy()
+                save_pred.columns = ['score']
+                save_label = aligned[['label']].copy()
+                save_label.columns = ['label']
+                last_recorder.save_objects(**{"pred.pkl": save_pred, "label.pkl": save_label})
+                logger.info(f"已将合并滚动预测({len(save_pred)}条)写回 recorder {last_rid}")
+            except Exception as e:
+                logger.warning(f"保存合并滚动预测失败（不影响训练结果）: {e}")
+
+            progress_callback(95, f"滚动训练完成！整体 IC={rolling_metrics['IC']:.4f}, ICIR={rolling_metrics['ICIR']:.4f}")
+
+            return {
+                "success": True,
+                "recorder_id": last_rid,
+                "message": (f"滚动训练完成！{n_rolls} 轮，"
+                            f"IC={rolling_metrics['IC']:.4f}, "
+                            f"ICIR={rolling_metrics['ICIR']:.4f}"),
+                "metrics": rolling_metrics,
+            }
+
+        except Exception as e:
+            progress_callback(-1, f"滚动训练失败: {str(e)}")
+            return {"success": False, "message": f"滚动训练失败: {str(e)}"}
     
     def backtest_model(self, recorder_id, market, benchmark, start_date, end_date,
-                      initial_account, topk, n_drop, hold_days, stop_loss, strategy_type, seed=42):
+                      initial_account, topk, n_drop, hold_days, stop_loss, strategy_type, seed=42,
+                      deal_price="close", open_cost=0.0005, close_cost=0.0015,
+                      limit_threshold=0.095, only_tradable=True):
         """执行回测
         
         Parameters
         ----------
         seed : int
             随机种子，确保回测结果可复现（默认42）
+        deal_price : str
+            成交价类型，"close" 或 "vwap"（默认 vwap，更贴近实盘）
+        open_cost : float
+            买入佣金费率
+        close_cost : float
+            卖出佣金+印花税费率
+        limit_threshold : float
+            涨跌停阈值
+        only_tradable : bool
+            是否只交易可买卖的股票
         """
         try:
             # 设置随机种子，确保回测结果可复现
@@ -876,27 +1231,47 @@ class QlibService:
                         if not model_loaded:
                             return {"success": False, "message": f"回测和分析失败: 无法加载训练好的模型。错误: {error_msg}"}
 
-            # 读取训练时的 fit 时间参数（用于特征标准化，防止数据泄露）
+            # 读取训练时的参数（handler类型、fit时间等），确保回测使用相同的数据处理
             train_params = recorder.list_params()
             fit_start_time = train_params.get('fit_start_time', start_date)
             fit_end_time = train_params.get('fit_end_time', end_date)
+            handler_type = train_params.get('handler_type', 'Alpha158')
+            label_horizon = int(train_params.get('label_horizon', 1))
+            handler_module_path = self.HANDLER_REGISTRY.get(handler_type, "qlib.contrib.data.handler")
 
             # 加载数据集（需要重新构建）
+            model_type = train_params.get('model_type', 'LGBModel')
             data_handler_config = {
                 "start_time": start_date,
                 "end_time": end_date,
-                "fit_start_time": fit_start_time,  # 使用训练时的统计时间
-                "fit_end_time": fit_end_time,      # 使用训练时的统计时间
+                "fit_start_time": fit_start_time,
+                "fit_end_time": fit_end_time,
                 "instruments": market,
             }
+            
+            # 对于树模型（LGBM/XGB），不使用额外的 processors 避免破坏特征分布
+            if model_type not in ["LGBModel", "XGBModel", "CatBoostModel", "DEnsembleModel"]:
+                data_handler_config["infer_processors"] = [
+                    {"class": "RobustZScoreNorm", "kwargs": {"fields_group": "feature", "clip_outlier": True}},
+                    {"class": "Fillna", "kwargs": {"fields_group": "feature"}},
+                ]
+                data_handler_config["learn_processors"] = [
+                    {"class": "DropnaLabel"},
+                    {"class": "CSRankNorm", "kwargs": {"fields_group": "label"}},
+                ]
+
+            # 回测使用与训练相同的标签周期
+            label_config = self._build_label_config(label_horizon)
+            if label_config is not None:
+                data_handler_config["label"] = label_config
             
             dataset = {
                 "class": "DatasetH",
                 "module_path": "qlib.data.dataset",
                 "kwargs": {
                     "handler": {
-                        "class": "Alpha158",
-                        "module_path": "qlib.contrib.data.handler",
+                        "class": handler_type,
+                        "module_path": handler_module_path,
                         "kwargs": data_handler_config,
                     },
                     "segments": {
@@ -919,7 +1294,9 @@ class QlibService:
                         "topk": topk,
                         "n_drop": n_drop,
                         "hold_days": hold_days,
-                        "stop_loss": stop_loss / 100.0,  # 转换为小数
+                        "stop_loss": stop_loss / 100.0 if stop_loss > 0 else 0.0,
+                        "only_tradable": only_tradable,
+                        "forbid_all_trade_at_limit": False,
                     },
                 }
             else:
@@ -932,6 +1309,8 @@ class QlibService:
                         "dataset": dataset,
                         "topk": topk,
                         "n_drop": n_drop,
+                        "only_tradable": only_tradable,
+                        "forbid_all_trade_at_limit": False,
                     },
                 }
 
@@ -952,10 +1331,10 @@ class QlibService:
                     "benchmark": benchmark,
                     "exchange_kwargs": {
                         "freq": "day",
-                        "limit_threshold": 0.095,
-                        "deal_price": "close",
-                        "open_cost": 0.0005,
-                        "close_cost": 0.0015,
+                        "limit_threshold": limit_threshold,
+                        "deal_price": deal_price,
+                        "open_cost": open_cost,
+                        "close_cost": close_cost,
                         "min_cost": 5,
                     },
                 },
@@ -1065,6 +1444,82 @@ class QlibService:
         except Exception as e:
             print(f"[DEBUG] 获取交易日历失败: {e}")
             return target_date - pd.Timedelta(days=n_days)
+
+    def _calculate_stock_statistics(self, all_positions_data, positions):
+        """统计每只股票的盈亏情况
+        
+        Returns:
+            list: 每只股票的统计信息，包括：
+                - stock_code: 股票代码
+                - stock_name: 股票名称
+                - first_buy_date: 最早买入时间
+                - last_sell_date: 最后卖出时间
+                - cumulative_profit: 累计盈亏金额（所有交易）
+                - hold_profit: 持有盈亏金额（假设从最早买入到最后卖出一直持有）
+        """
+        from collections import defaultdict
+        
+        # 收集每只股票的所有持仓记录
+        stock_records = defaultdict(list)
+        
+        for date_str, date_positions in sorted(all_positions_data.items()):
+            for pos in date_positions:
+                stock_records[pos['stock_code']].append({
+                    'date': date_str,
+                    'stock_name': pos['stock_name'],
+                    'amount': pos['amount'],
+                    'cost_price': pos['cost_price'],
+                    'current_price': pos['current_price'],
+                    'hold_value': pos['hold_value']
+                })
+        
+        # 获取所有股票名称
+        all_stock_codes = list(stock_records.keys())
+        stock_names, _, _ = self.get_stock_names(all_stock_codes)
+        
+        # 统计每只股票
+        statistics = []
+        for stock_code, records in stock_records.items():
+            if not records:
+                continue
+            
+            # 按日期排序
+            records.sort(key=lambda x: x['date'])
+            
+            first_buy_date = records[0]['date']
+            last_sell_date = records[-1]['date']
+            stock_name = stock_names.get(stock_code, records[0]['stock_name'])
+            
+            # 计算累计盈亏：每次持仓的盈亏累加
+            cumulative_profit = 0.0
+            for record in records:
+                # 每次持仓的盈亏 = (当前价 - 成本价) * 数量
+                profit = (record['current_price'] - record['cost_price']) * record['amount']
+                cumulative_profit += profit
+            
+            # 计算持有盈亏：假设从最早买入到最后卖出一直持有
+            # 最早买入时的成本价
+            first_cost_price = records[0]['cost_price']
+            # 最后卖出时的价格
+            last_current_price = records[-1]['current_price']
+            # 使用平均持仓数量
+            avg_amount = sum(r['amount'] for r in records) / len(records)
+            # 持有盈亏 = (最后价格 - 最初成本) * 平均数量
+            hold_profit = (last_current_price - first_cost_price) * avg_amount
+            
+            statistics.append({
+                'stock_code': stock_code,
+                'stock_name': stock_name,
+                'first_buy_date': first_buy_date,
+                'last_sell_date': last_sell_date,
+                'cumulative_profit': round(cumulative_profit, 2),
+                'hold_profit': round(hold_profit, 2)
+            })
+        
+        # 按累计盈亏排序（从高到低）
+        statistics.sort(key=lambda x: x['cumulative_profit'], reverse=True)
+        
+        return statistics
 
     def get_backtest_result(self, recorder_id):
         """获取回测结果"""
@@ -1277,6 +1732,9 @@ class QlibService:
                             'profit_rate': float(profit_rate)
                         })
             
+            # 统计每只股票的盈亏情况
+            stock_statistics = self._calculate_stock_statistics(all_positions_data, positions)
+            
             # 获取回测配置参数
             backtest_config = recorder.list_params()
 
@@ -1287,6 +1745,7 @@ class QlibService:
                 "daily_data": daily_data,
                 "positions": positions_data,
                 "all_positions": all_positions_data,
+                "stock_statistics": stock_statistics,
                 "last_date": last_date.strftime('%Y-%m-%d') if positions else None,
                 "config": {
                     "market": backtest_config.get("backtest_market", "csi300"),
@@ -1554,6 +2013,98 @@ class QlibService:
                     if 'rank_ic' in viz_data['ic_data']:
                         viz_data['ic_data']['rank_ic'] = safe_list(viz_data['ic_data']['rank_ic'])
 
+            # 提取因子重要性（仅树模型支持）
+            feature_importance = None
+            try:
+                model_type = params.get('model_type', '')
+                if model_type in ('LGBModel', 'XGBModel', 'CatBoostModel', 'DEnsembleModel'):
+                    try:
+                        model_obj = recorder.load_object("trained_model")
+                    except:
+                        import pickle
+                        mlruns_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mlruns")
+                        backup_path = os.path.join(mlruns_dir, "model_backups", f"{recorder_id}_trained_model.pkl")
+                        if os.path.exists(backup_path):
+                            with open(backup_path, 'rb') as f:
+                                model_obj = pickle.load(f)
+                        else:
+                            model_obj = None
+
+                    # 加载保存的特征列名（优先）
+                    saved_feature_names = None
+                    try:
+                        saved_feature_names = recorder.load_object("feature_names")
+                    except:
+                        pass
+
+                    # 回退：根据 handler 重建特征列名
+                    if saved_feature_names is None:
+                        try:
+                            h_type = params.get('handler_type', 'Alpha158')
+                            h_module = self.HANDLER_REGISTRY.get(h_type, "qlib.contrib.data.handler")
+                            h_config = {
+                                "start_time": params.get('train_start_date', '2020-01-01'),
+                                "end_time": params.get('test_end_date', '2024-01-01'),
+                                "fit_start_time": params.get('train_start_date', '2020-01-01'),
+                                "fit_end_time": params.get('train_end_date', '2022-01-01'),
+                                "instruments": params.get('market', 'csi300'),
+                            }
+                            handler = init_instance_by_config({
+                                "class": h_type,
+                                "module_path": h_module,
+                                "kwargs": h_config,
+                            })
+                            train_data = handler.fetch(col_set="feature")
+                            saved_feature_names = list(train_data.columns)
+                        except Exception as e:
+                            logger.warning(f"回退获取特征列名失败: {e}")
+
+                    if model_obj is not None:
+                        # 获取内部模型对象
+                        inner_model = getattr(model_obj, 'model', None)
+                        if inner_model is not None:
+                            fi_values = None
+                            fi_names = None
+
+                            if hasattr(inner_model, 'feature_importance'):
+                                # LightGBM
+                                fi_values = inner_model.feature_importance(importance_type='gain')
+                                fi_names = inner_model.feature_name()
+                            elif hasattr(inner_model, 'get_score'):
+                                # XGBoost
+                                score = inner_model.get_score(importance_type='gain')
+                                fi_names = list(score.keys())
+                                fi_values = list(score.values())
+                            elif hasattr(inner_model, 'get_feature_importance'):
+                                # CatBoost
+                                fi_values = inner_model.get_feature_importance()
+                                fi_names = [f"f{i}" for i in range(len(fi_values))]
+
+                            # 将 Column_X 映射回真实特征名
+                            if fi_names is not None and saved_feature_names:
+                                mapped_names = []
+                                for name in fi_names:
+                                    if name.startswith("Column_"):
+                                        try:
+                                            idx = int(name.split("_")[1])
+                                            if idx < len(saved_feature_names):
+                                                mapped_names.append(str(saved_feature_names[idx]))
+                                                continue
+                                        except (ValueError, IndexError):
+                                            pass
+                                    mapped_names.append(name)
+                                fi_names = mapped_names
+
+                            if fi_values is not None and fi_names is not None:
+                                # 排序并返回 top features
+                                fi_pairs = sorted(zip(fi_names, fi_values), key=lambda x: x[1], reverse=True)
+                                feature_importance = [
+                                    {"name": name, "importance": float(val)}
+                                    for name, val in fi_pairs if val > 0
+                                ]
+            except Exception as e:
+                logger.warning(f"提取因子重要性失败: {e}")
+
             return {
                 "success": True,
                 "recorder_id": recorder_id,
@@ -1561,7 +2112,8 @@ class QlibService:
                 "metrics": viz_data.get('metrics', {}) if viz_data else {},
                 "group_returns": viz_data.get('group_returns', {}) if viz_data else {},
                 "test_returns": viz_data.get('test_returns', {}) if viz_data else {},
-                "ic_data": viz_data.get('ic_data', {}) if viz_data else {}
+                "ic_data": viz_data.get('ic_data', {}) if viz_data else {},
+                "feature_importance": feature_importance,
             }
         except Exception as e:
             return {"success": False, "message": f"获取训练结果失败: {str(e)}"}
@@ -1615,6 +2167,23 @@ class QlibService:
             return {"success": True, "message": f"回测记录 {recorder_id} 已删除"}
         except Exception as e:
             return {"success": False, "message": f"删除回测记录失败: {str(e)}"}
+
+    def delete_all_backtest_recorders(self):
+        """删除所有回测记录"""
+        try:
+            exp = R.get_exp(experiment_name="backtest_analysis")
+            recorders = exp.list_recorders(rtype="list")
+            deleted_count = 0
+            for recorder in recorders:
+                try:
+                    exp.delete_recorder(recorder.id)
+                    self._clean_mlruns_files(recorder.id)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"删除记录 {recorder.id} 失败: {e}")
+            return {"success": True, "message": f"已删除 {deleted_count} 条回测记录"}
+        except Exception as e:
+            return {"success": False, "message": f"删除所有回测记录失败: {str(e)}"}
 
     def _clean_mlruns_files(self, recorder_id):
         """清理mlruns目录中的文件"""
@@ -1697,3 +2266,142 @@ class QlibService:
             }
         except Exception as e:
             return {"success": False, "message": f"获取股票行情失败: {str(e)}"}
+
+    def predict_today(self, recorder_id, market, topk=10, n_drop=1):
+        """
+        生成每日交易信号：加载模型，用最新数据生成预测，输出买卖建议
+        
+        Parameters
+        ----------
+        recorder_id : str
+            训练记录ID
+        market : str
+            市场（csi300, csi500 等）
+        topk : int
+            目标持仓数量
+        n_drop : int
+            每日最多换仓数量
+            
+        Returns
+        -------
+        dict
+            包含 buy_list, sell_list, hold_list, full_scores 等
+        """
+        try:
+            # 1. 加载模型和训练参数
+            recorder = R.get_recorder(recorder_id=recorder_id, experiment_name="train_model")
+            train_params = recorder.list_params()
+            handler_type = train_params.get('handler_type', 'Alpha158')
+            label_horizon = int(train_params.get('label_horizon', 1))
+            handler_module_path = self.HANDLER_REGISTRY.get(handler_type, "qlib.contrib.data.handler")
+            fit_start_time = train_params.get('fit_start_time', train_params.get('train_start_date', '2020-01-01'))
+            fit_end_time = train_params.get('fit_end_time', train_params.get('train_end_date', '2024-01-01'))
+
+            # 加载模型
+            try:
+                model = recorder.load_object("trained_model")
+            except:
+                import pickle
+                mlruns_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mlruns")
+                backup_path = os.path.join(mlruns_dir, "model_backups", f"{recorder_id}_trained_model.pkl")
+                with open(backup_path, 'rb') as f:
+                    model = pickle.load(f)
+
+            # 2. 构建今日数据集（用最近 2 个交易日的数据以确保有当天特征）
+            today = pd.Timestamp.now().strftime('%Y-%m-%d')
+            # 往前推 5 天确保覆盖到最近交易日
+            start_date = (pd.Timestamp.now() - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
+
+            # 与 train / backtest 保持一致：树模型不使用额外 processors
+            model_type = train_params.get('model_type', 'LGBModel')
+            is_tree_model = model_type in ("LGBModel", "XGBModel", "CatBoostModel", "DEnsembleModel")
+
+            data_handler_config = {
+                "start_time": start_date,
+                "end_time": today,
+                "fit_start_time": fit_start_time,
+                "fit_end_time": fit_end_time,
+                "instruments": market,
+            }
+
+            if not is_tree_model:
+                data_handler_config["infer_processors"] = [
+                    {"class": "RobustZScoreNorm", "kwargs": {"fields_group": "feature", "clip_outlier": True}},
+                    {"class": "Fillna", "kwargs": {"fields_group": "feature"}},
+                ]
+                data_handler_config["learn_processors"] = [
+                    {"class": "DropnaLabel"},
+                    {"class": "CSRankNorm", "kwargs": {"fields_group": "label"}},
+                ]
+
+            # 预测使用与训练相同的标签周期
+            label_config = self._build_label_config(label_horizon)
+            if label_config is not None:
+                data_handler_config["label"] = label_config
+
+            dataset_config = {
+                "class": "DatasetH",
+                "module_path": "qlib.data.dataset",
+                "kwargs": {
+                    "handler": {
+                        "class": handler_type,
+                        "module_path": handler_module_path,
+                        "kwargs": data_handler_config,
+                    },
+                    "segments": {
+                        "test": (start_date, today),
+                    },
+                },
+            }
+
+            dataset = init_instance_by_config(dataset_config)
+
+            # 3. 模型预测
+            pred = model.predict(dataset)
+            if isinstance(pred, pd.Series):
+                pred = pred.to_frame("score")
+
+            # 取最新交易日的预测
+            latest_date = pred.index.get_level_values('datetime').max()
+            today_pred = pred.xs(latest_date, level='datetime').sort_values('score', ascending=False)
+
+            # 4. 生成信号
+            # 获取股票名称
+            all_stocks = today_pred.index.tolist()
+            stock_names, _, _ = self.get_stock_names(all_stocks)
+
+            # Top-K 买入列表
+            buy_candidates = today_pred.head(topk)
+            full_scores = []
+            for stock, row in today_pred.iterrows():
+                full_scores.append({
+                    "stock_code": stock,
+                    "stock_name": stock_names.get(stock, stock),
+                    "score": float(row['score']),
+                    "rank": len(full_scores) + 1,
+                })
+
+            buy_list = []
+            for stock, row in buy_candidates.iterrows():
+                buy_list.append({
+                    "stock_code": stock,
+                    "stock_name": stock_names.get(stock, stock),
+                    "score": float(row['score']),
+                })
+
+            return {
+                "success": True,
+                "prediction_date": latest_date.strftime('%Y-%m-%d'),
+                "market": market,
+                "model_type": train_params.get('model_type', 'Unknown'),
+                "handler_type": handler_type,
+                "topk": topk,
+                "buy_list": buy_list,
+                "full_scores": full_scores[:100],  # 返回前100只的评分
+                "total_stocks": len(today_pred),
+                "message": f"生成 {latest_date.strftime('%Y-%m-%d')} 交易信号成功，共评估 {len(today_pred)} 只股票"
+            }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "message": f"生成预测信号失败: {str(e)}"}

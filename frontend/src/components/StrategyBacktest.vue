@@ -23,8 +23,8 @@
             <el-select v-model="config.benchmark" class="config-select">
               <el-option label="沪深300" value="SH000300" />
               <el-option label="上证50" value="SH000016" />
-              <el-option label="中证500" value="SH000852" />
-              <el-option label="中证1000" value="SH000905" />
+              <el-option label="中证500" value="SH000905" />
+              <el-option label="中证1000" value="SH000852" />
             </el-select>
           </div>
           <div class="config-item">
@@ -60,7 +60,15 @@
               <label class="config-label">持仓数量 (Topk)</label>
               <span class="slider-value">{{ config.topk }}</span>
             </div>
-            <el-slider v-model="config.topk" :min="1" :max="50" :step="1" />
+            <el-slider v-model="config.topk" :min="5" :max="50" :step="5" />
+          </div>
+          <div class="param-slider">
+            <div class="slider-header">
+              <label class="config-label">每日换仓数 (n_drop)</label>
+              <span class="slider-value">{{ config.n_drop }}</span>
+            </div>
+            <el-slider v-model="config.n_drop" :min="1" :max="20" :step="1" />
+            <span class="hint-text">每次调仓替换的股票数量</span>
           </div>
           <div class="param-slider">
             <div class="slider-header">
@@ -76,7 +84,36 @@
               <span class="slider-value">{{ config.stop_loss }}%</span>
             </div>
             <el-slider v-model="config.stop_loss" :min="0" :max="20" :step="1" />
-            <span class="hint-text">0=不止损，建议5-10%</span>
+            <span class="hint-text">0=不止损（每日调仓时建议关闭止损）</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 交易参数 -->
+      <div class="config-block">
+        <div class="block-header">
+          <span class="block-icon">💹</span>
+          <h3>交易参数</h3>
+        </div>
+        <div class="params-grid">
+          <div class="config-item">
+            <label class="config-label">成交价类型</label>
+            <el-select v-model="config.deal_price" class="config-select">
+              <el-option label="VWAP（推荐）" value="vwap" />
+              <el-option label="收盘价" value="close" />
+            </el-select>
+          </div>
+          <div class="config-item">
+            <label class="config-label">只交易可买卖股票</label>
+            <el-switch v-model="config.only_tradable" />
+          </div>
+          <div class="config-item">
+            <label class="config-label">买入佣金</label>
+            <el-input-number v-model="config.open_cost" :min="0" :max="0.01" :step="0.0001" :precision="4" />
+          </div>
+          <div class="config-item">
+            <label class="config-label">卖出佣金+印花税</label>
+            <el-input-number v-model="config.close_cost" :min="0" :max="0.01" :step="0.0001" :precision="4" />
           </div>
         </div>
       </div>
@@ -148,13 +185,19 @@ const config = reactive({
   start_date: '',
   end_date: '',
   initial_account: 100,
-  topk: 5,
+  topk: 10,
   n_drop: 1,
-  hold_days: 3,
-  stop_loss: 5,
+  hold_days: 1,
+  stop_loss: 0,
   strategy_type: 'TopkDropoutStrategy',
   recorder_id: '',
-  seed: 42  // 随机种子，确保回测结果可复现
+  seed: 42,
+  // 交易参数
+  deal_price: 'vwap',
+  open_cost: 0.0005,
+  close_cost: 0.0015,
+  limit_threshold: 0.095,
+  only_tradable: true,
 })
 
 onMounted(() => {
@@ -232,22 +275,11 @@ const deleteRecorder = async () => {
 const deleteAllRecorders = async () => {
   try {
     await ElMessageBox.confirm(`确定删除所有 ${trainRecorders.value.length} 条训练记录？此操作不可恢复！`, '确认全部删除', { type: 'warning' })
-    let successCount = 0
-    let failCount = 0
-    for (const rec of trainRecorders.value) {
-      try {
-        const res = await axios.delete(`${API_BASE_URL}/qlib/recorders/${rec.id}`)
-        if (res.data.success) successCount++
-        else failCount++
-      } catch (e) {
-        failCount++
-      }
-    }
-    if (successCount > 0) {
-      ElMessage.success(`成功删除 ${successCount} 条记录`)
-    }
-    if (failCount > 0) {
-      ElMessage.error(`${failCount} 条记录删除失败`)
+    const res = await axios.delete(`${API_BASE_URL}/qlib/recorders`)
+    if (res.data.success) {
+      ElMessage.success(res.data.message)
+    } else {
+      ElMessage.error(res.data.message)
     }
     loadRecorders()
   } catch (e) {

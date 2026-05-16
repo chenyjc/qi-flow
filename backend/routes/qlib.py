@@ -14,6 +14,10 @@ API 端点清单:
 模型训练:
   POST   /train_stream             - 训练模型（SSE流式）
   POST   /train                    - 训练模型（非流式）[Deprecated]
+  POST   /train_rolling_stream     - 滚动重训练（SSE流式）
+
+预测信号:
+  POST   /predict                  - 生成每日交易信号（买入/卖出建议）
 
 回测:
   POST   /backtest                 - 执行回测
@@ -28,6 +32,7 @@ API 端点清单:
   DELETE /recorders/{id}           - 删除训练记录
   DELETE /recorders                - 删除所有训练记录
   DELETE /backtest_recorders/{id}  - 删除回测记录
+  DELETE /backtest_recorders       - 删除所有回测记录
 
 Deprecated API:
 ===============
@@ -55,14 +60,15 @@ class TrainRequest(BaseModel):
     test_start_date: str
     test_end_date: str
     model_type: str = "LGBModel"
-    lr: float = 0.0421
-    max_depth: int = 8
-    num_leaves: int = 210
-    subsample: float = 0.8789
-    colsample_bytree: float = 0.8879
+    lr: float = 0.05
+    max_depth: int = -1
+    num_leaves: int = 64
+    subsample: float = 0.8
+    colsample_bytree: float = 0.8
     seed: int = 42
-    num_threads: int = 1
+    num_threads: int = -1
     handler_type: str = "Alpha158"
+    label_horizon: int = 1  # 预测周期(天): 1=次日, 5=周, 10=双周, 20=月
 
 class BacktestRequest(BaseModel):
     recorder_id: str
@@ -73,10 +79,16 @@ class BacktestRequest(BaseModel):
     initial_account: int = 1000000
     topk: int = 10
     n_drop: int = 1
-    hold_days: int = 3
-    stop_loss: float = 5.0
+    hold_days: int = 1
+    stop_loss: float = 0.0
     strategy_type: str = "TopkDropoutStrategy"
-    seed: int = 42  # 随机种子，确保回测结果可复现
+    seed: int = 42
+    # 交易参数
+    deal_price: str = "vwap"       # 成交价类型: close / vwap
+    open_cost: float = 0.0005     # 买入佣金
+    close_cost: float = 0.0015    # 卖出佣金+印花税
+    limit_threshold: float = 0.095  # 涨跌停阈值
+    only_tradable: bool = True    # 只交易可买卖的股票
 
 @router.get("/check_data_release")
 async def check_data_release():
@@ -100,13 +112,13 @@ async def download_qlib_data_stream():
         
         # 在后台线程中执行下载
         import threading
-        error = None
+        error_holder = [None]
         
         def run_download():
             try:
                 qlib_service.download_data_with_progress(sync_progress_callback)
             except Exception as e:
-                error = e
+                error_holder[0] = e
         
         thread = threading.Thread(target=run_download)
         thread.start()
@@ -124,8 +136,8 @@ async def download_qlib_data_stream():
         thread.join()
         
         # 发送最终结果
-        if error:
-            yield f"data: {json.dumps({'progress': -1, 'message': f'下载失败: {str(error)}', 'success': False})}\n\n"
+        if error_holder[0]:
+            yield f"data: {json.dumps({'progress': -1, 'message': f'下载失败: {str(error_holder[0])}', 'success': False})}\n\n"
         else:
             yield f"data: {json.dumps({'progress': 100, 'message': 'Qlib数据已更新完成！旧数据已备份。', 'success': True})}\n\n"
     
@@ -192,7 +204,8 @@ async def train_model_stream(request: TrainRequest):
                     colsample_bytree=request.colsample_bytree,
                     seed=request.seed,
                     num_threads=request.num_threads,
-                    handler_type=request.handler_type
+                    handler_type=request.handler_type,
+                    label_horizon=request.label_horizon
                 )
             except Exception as e:
                 error_holder[0] = e
@@ -267,7 +280,36 @@ async def backtest_model(request: BacktestRequest):
             hold_days=request.hold_days,
             stop_loss=request.stop_loss,
             strategy_type=request.strategy_type,
-            seed=request.seed
+            seed=request.seed,
+            deal_price=request.deal_price,
+            open_cost=request.open_cost,
+            close_cost=request.close_cost,
+            limit_threshold=request.limit_threshold,
+            only_tradable=request.only_tradable,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class PredictRequest(BaseModel):
+    recorder_id: str
+    market: str = "csi300"
+    topk: int = 10
+    n_drop: int = 1
+
+@router.post("/predict")
+async def predict_today(request: PredictRequest):
+    """生成每日交易信号
+
+    使用训练好的模型对当日市场数据进行预测，输出 topk 推荐买入股票列表。
+    无需跑完整回测，几秒内返回结果。适合每日盘前调用。
+    """
+    try:
+        result = qlib_service.predict_today(
+            recorder_id=request.recorder_id,
+            market=request.market,
+            topk=request.topk,
+            n_drop=request.n_drop,
         )
         return result
     except Exception as e:
@@ -347,6 +389,106 @@ async def delete_backtest_recorder(recorder_id: str):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/backtest_recorders")
+async def delete_all_backtest_recorders():
+    """删除所有回测记录"""
+    try:
+        result = qlib_service.delete_all_backtest_recorders()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RollingTrainRequest(BaseModel):
+    market: str = "csi300"
+    benchmark: str = "SH000300"
+    train_start_date: str
+    train_end_date: str
+    test_start_date: str
+    test_end_date: str
+    model_type: str = "LGBModel"
+    lr: float = 0.05
+    max_depth: int = -1
+    num_leaves: int = 64
+    subsample: float = 0.8
+    colsample_bytree: float = 0.8
+    seed: int = 42
+    num_threads: int = -1
+    handler_type: str = "Alpha158"
+    label_horizon: int = 5
+    rolling_step: int = 20
+
+@router.post("/train_rolling_stream")
+async def train_rolling_stream(request: RollingTrainRequest):
+    """滚动重训练（SSE流式返回进度）
+
+    按 rolling_step 滑动窗口多次训练并合并预测，提升 IC/ICIR。
+    """
+    async def event_generator():
+        progress_queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def sync_progress_callback(progress, message):
+            asyncio.run_coroutine_threadsafe(
+                progress_queue.put({"progress": progress, "message": message}),
+                loop
+            )
+
+        import threading
+        error_holder = [None]
+        result_holder = [None]
+
+        def run_train():
+            try:
+                result_holder[0] = qlib_service.train_rolling_with_progress(
+                    sync_progress_callback,
+                    market=request.market,
+                    benchmark=request.benchmark,
+                    train_start_date=request.train_start_date,
+                    train_end_date=request.train_end_date,
+                    test_start_date=request.test_start_date,
+                    test_end_date=request.test_end_date,
+                    model_type=request.model_type,
+                    lr=request.lr,
+                    max_depth=request.max_depth,
+                    num_leaves=request.num_leaves,
+                    subsample=request.subsample,
+                    colsample_bytree=request.colsample_bytree,
+                    seed=request.seed,
+                    num_threads=request.num_threads,
+                    handler_type=request.handler_type,
+                    label_horizon=request.label_horizon,
+                    rolling_step=request.rolling_step,
+                )
+            except Exception as e:
+                error_holder[0] = e
+
+        thread = threading.Thread(target=run_train)
+        thread.start()
+
+        while thread.is_alive() or not progress_queue.empty():
+            try:
+                item = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
+                yield f"data: {json.dumps(item)}\n\n"
+            except asyncio.TimeoutError:
+                pass
+
+        thread.join()
+
+        if error_holder[0]:
+            yield f"data: {json.dumps({'progress': -1, 'message': f'滚动训练失败: {str(error_holder[0])}', 'success': False})}\n\n"
+        elif result_holder[0]:
+            result = result_holder[0]
+            if result.get("success"):
+                recorder_id = result.get('recorder_id', 'unknown')
+                yield f"data: {json.dumps({'progress': 100, 'message': result.get('message', '滚动训练完成！'), 'success': True, 'recorder_id': recorder_id})}\n\n"
+            else:
+                yield f"data: {json.dumps({'progress': -1, 'message': result.get('message', '滚动训练失败'), 'success': False})}\n\n"
+        else:
+            yield f"data: {json.dumps({'progress': -1, 'message': '滚动训练失败: 无返回结果', 'success': False})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 class StockQuoteRequest(BaseModel):

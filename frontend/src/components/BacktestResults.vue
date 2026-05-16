@@ -279,6 +279,45 @@
       </div>
     </div>
 
+    <!-- 股票盈亏统计 -->
+    <div v-if="stockStatistics && stockStatistics.length" class="statistics-section">
+      <div class="statistics-header">
+        <span>📊</span>
+        <span>股票盈亏统计</span>
+        <span class="statistics-count">共 {{ stockStatistics.length }} 只股票</span>
+      </div>
+      <div class="table-wrapper">
+        <el-table
+          :data="stockStatistics"
+          style="width: 100%"
+          :default-sort="{ prop: 'cumulative_profit', order: 'descending' }"
+        >
+          <el-table-column prop="stock_code" label="股票代码" align="center" width="120">
+            <template #default="{ row }">
+              <StockLink :code="row.stock_code" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="stock_name" label="股票名称" align="center" width="120" />
+          <el-table-column prop="first_buy_date" label="最早买入" align="center" width="120" sortable />
+          <el-table-column prop="last_sell_date" label="最后卖出" align="center" width="120" sortable />
+          <el-table-column prop="cumulative_profit" label="累计盈亏" align="center" width="140" sortable>
+            <template #default="{ row }">
+              <span :class="row.cumulative_profit >= 0 ? 'up-red' : 'down-green'">
+                {{ row.cumulative_profit >= 0 ? '+' : '' }}¥{{ formatCurrency(row.cumulative_profit) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="hold_profit" label="持有盈亏" align="center" width="140" sortable>
+            <template #default="{ row }">
+              <span :class="row.hold_profit >= 0 ? 'up-red' : 'down-green'">
+                {{ row.hold_profit >= 0 ? '+' : '' }}¥{{ formatCurrency(row.hold_profit) }}
+              </span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+
     <!-- 历史交易 -->
     <div class="trades-section">
       <div class="trades-header">
@@ -389,6 +428,7 @@ const dailyData = ref(null)
 const positions = ref([])
 const finalPositions = ref([])
 const allPositions = ref({})
+const stockStatistics = ref([])
 const selectedDate = ref('')
 const showPositionPopup = ref(false)
 const lastDate = ref('')
@@ -464,6 +504,7 @@ const loadResult = async () => {
   cumulativeData.value = null
   dailyData.value = null
   positions.value = []
+  stockStatistics.value = []
 
   try {
     const res = await axios.get(`${API}/qlib/backtest_result/${selectedId.value}`)
@@ -479,9 +520,11 @@ const loadResult = async () => {
       positions.value = res.data.positions || []
       finalPositions.value = res.data.positions || []
       allPositions.value = res.data.all_positions || {}
+      stockStatistics.value = res.data.stock_statistics || []
       lastDate.value = res.data.last_date || ''
       selectedDate.value = res.data.last_date || ''
       console.log('All positions loaded:', Object.keys(allPositions.value).length, 'dates')
+      console.log('Stock statistics loaded:', stockStatistics.value.length, 'stocks')
       await nextTick()
       renderCharts()
     } else {
@@ -654,22 +697,11 @@ const deleteRecorder = async () => {
 const deleteAllRecorders = async () => {
   try {
     await ElMessageBox.confirm(`确定删除所有 ${recorders.value.length} 条回测记录？此操作不可恢复！`, '确认全部删除', { type: 'warning' })
-    let successCount = 0
-    let failCount = 0
-    for (const rec of recorders.value) {
-      try {
-        const res = await axios.delete(`${API}/qlib/backtest_recorders/${rec.id}`)
-        if (res.data.success) successCount++
-        else failCount++
-      } catch (e) {
-        failCount++
-      }
-    }
-    if (successCount > 0) {
-      ElMessage.success(`成功删除 ${successCount} 条记录`)
-    }
-    if (failCount > 0) {
-      ElMessage.error(`${failCount} 条记录删除失败`)
+    const res = await axios.delete(`${API}/qlib/backtest_recorders`)
+    if (res.data.success) {
+      ElMessage.success(res.data.message)
+    } else {
+      ElMessage.error(res.data.message)
     }
     metrics.value = null
     config.value = null
@@ -1182,6 +1214,34 @@ const deleteAllRecorders = async () => {
 
 .modern-pagination :deep(.el-select) {
   --el-select-hover-border: #667eea;
+}
+
+/* 股票盈亏统计样式 */
+.statistics-section {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  margin-top: 20px;
+}
+
+.statistics-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.statistics-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: #6c757d;
+  background: #f8f9fa;
+  padding: 4px 12px;
+  border-radius: 6px;
 }
 
 /* 历史交易样式 */
