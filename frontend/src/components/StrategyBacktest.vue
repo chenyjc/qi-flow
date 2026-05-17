@@ -125,8 +125,8 @@
           <h3>训练记录选择</h3>
         </div>
         <div class="recorder-row">
-          <el-select v-model="config.recorder_id" class="recorder-select" placeholder="选择训练记录">
-            <el-option v-for="rec in trainRecorders" :key="rec.id" :label="rec.name || `${rec.start_time} - ${rec.id}`" :value="rec.id" />
+          <el-select v-model="config.recorder_id" class="recorder-select" placeholder="选择训练记录" @change="adjustBacktestDates">
+            <el-option v-for="rec in trainRecorders" :key="rec.id" :label="formatRecorderLabel(rec)" :value="rec.id" />
           </el-select>
           <button class="refresh-btn" @click="loadRecorders" :disabled="loadingRecorders">
             <span v-if="!loadingRecorders">🔄</span>
@@ -215,7 +215,64 @@ const initDates = () => {
   config.end_date = formatDate(yesterday)
 }
 
+// 根据选中的训练记录动态调整回测开始日期
+const adjustBacktestDates = () => {
+  const selectedRecorder = trainRecorders.value.find(r => r.id === config.recorder_id)
+  if (selectedRecorder && selectedRecorder.train_end) {
+    const trainEnd = new Date(selectedRecorder.train_end)
+    const labelHorizon = selectedRecorder.params?.label_horizon || 5
+    
+    // 判断是否为滚动训练
+    const isRolling = selectedRecorder.params?.is_rolling === 'true'
+    
+    // 滚动训练需要更大的安全间隙（因为训练结束已经考虑了 label_horizon + 6）
+    // 普通训练：safeGap = label_horizon + 1
+    // 滚动训练：safeGap = 1（因为训练结束已经提前截断了）
+    const safeGapDays = isRolling ? 1 : parseInt(labelHorizon) + 1
+    
+    // 计算最小回测开始日期
+    const minBacktestStart = new Date(trainEnd)
+    minBacktestStart.setDate(minBacktestStart.getDate() + safeGapDays)
+    
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    
+    // 如果默认回测开始日期早于最小安全日期，则调整
+    const currentStart = new Date(config.start_date)
+    if (currentStart < minBacktestStart) {
+      config.start_date = formatDate(minBacktestStart)
+      const modeText = isRolling ? '滚动训练' : '普通训练'
+      ElMessage.info(`已自动调整回测开始日期为 ${config.start_date}（基于${modeText}记录，安全间隙 ${safeGapDays} 天）`)
+    }
+  }
+}
+
 const formatDate = (d) => d.toISOString().split('T')[0]
+
+const formatRecorderLabel = (rec) => {
+  // 优先从 params 中获取训练时间范围
+  const params = rec.params || {}
+  const trainStart = params.fit_start_time || params.train_start_date
+  const trainEnd = params.fit_end_time || params.train_end_date
+  
+  if (trainStart && trainEnd) {
+    return `${trainStart} ~ ${trainEnd} (${rec.name || rec.id})`
+  }
+  
+  // 降级：从 name 中解析日期
+  if (rec.name) {
+    const match = rec.name.match(/(\d{4})_to_(\d{8})/)
+    if (match) {
+      const start = match[1]
+      const end = match[2]
+      return `${start.slice(0,4)}-${start.slice(4,6)}-${start.slice(6,8)} ~ ${end.slice(0,4)}-${end.slice(4,6)}-${end.slice(6,8)}`
+    }
+  }
+  
+  // 最后降级
+  return rec.name || `${rec.start_time} - ${rec.id}`
+}
 
 const loadRecorders = async () => {
   loadingRecorders.value = true
@@ -223,7 +280,11 @@ const loadRecorders = async () => {
     const res = await axios.get(`${API_BASE_URL}/qlib/recorders`)
     if (res.data.success) {
       trainRecorders.value = res.data.recorders
-      if (trainRecorders.value.length) config.recorder_id = trainRecorders.value[0].id
+      if (trainRecorders.value.length) {
+        config.recorder_id = trainRecorders.value[0].id
+        // 加载记录后自动调整回测日期
+        adjustBacktestDates()
+      }
     }
   } catch (e) {
     ElMessage.error('加载训练记录失败')
@@ -237,6 +298,18 @@ const runBacktest = async () => {
     ElMessage.warning('请先选择训练记录')
     return
   }
+  
+  // 检查日期重叠
+  const selectedRecorder = trainRecorders.value.find(r => r.id === config.recorder_id)
+  if (selectedRecorder && selectedRecorder.train_end) {
+    const backtestStart = new Date(config.start_date)
+    const trainEnd = new Date(selectedRecorder.train_end)
+    if (backtestStart <= trainEnd) {
+      ElMessage.error(`回测开始日期(${config.start_date})不能早于或等于训练结束日期(${selectedRecorder.train_end})，否则会导致未来函数（数据泄露）。请调整回测开始日期。`)
+      return
+    }
+  }
+  
   running.value = true
   message.value = ''
   try {

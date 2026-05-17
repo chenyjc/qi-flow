@@ -56,8 +56,8 @@
             <el-select v-model="config.benchmark" class="config-select">
               <el-option label="沪深300" value="SH000300" />
               <el-option label="上证50" value="SH000016" />
-              <el-option label="中证500" value="SH000852" />
-              <el-option label="中证1000" value="SH000905" />
+              <el-option label="中证500" value="SH000905" />
+              <el-option label="中证1000" value="SH000852" />
             </el-select>
           </div>
         </div>
@@ -97,6 +97,40 @@
         </div>
       </div>
 
+      <!-- A股市场风格说明 -->
+      <div class="config-block info-block">
+        <div class="block-header">
+          <span class="block-icon">💡</span>
+          <h3>训练窗口建议</h3>
+        </div>
+        <div class="info-content">
+          <p class="info-summary">
+            <strong>推荐使用最近 3 年数据进行滚动训练</strong>，而非全历史数据。A 股 alpha 因子信号半衰期约 1-3 个月，
+            过长的训练周期会让模型学到多个风格的"平均模式"，在当前风格下信号被稀释。
+          </p>
+          <table class="style-table">
+            <thead>
+              <tr><th>时期</th><th>主导风格</th><th>驱动因素</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>2016-2018</td><td>大盘价值</td><td>供给侧改革、去杠杆</td></tr>
+              <tr><td>2019-2021</td><td>小盘成长</td><td>流动性宽松、核心资产抱团</td></tr>
+              <tr><td>2021-2023</td><td>价值回归</td><td>抱团瓦解、红利/资源股</td></tr>
+              <tr><td>2023-2024</td><td>AI/科技轮动</td><td>产业趋势驱动</td></tr>
+              <tr><td>2025-至今</td><td>宽基复苏</td><td>政策底→信用扩张</td></tr>
+            </tbody>
+          </table>
+          <div class="info-tips">
+            <p>📌 <strong>实操建议：</strong></p>
+            <ul>
+              <li>训练窗口 3 年 → 验证 2 个月 → 测试 3 个月（已设为默认值）</li>
+              <li>每月或每季度用最新数据重新训练，保持模型时效性</li>
+              <li>如需保留长周期数据价值，建议使用 <strong>DoubleEnsemble</strong> 模型（内置样本衰减机制）</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- 模型参数 -->
       <div class="config-block">
         <div class="block-header">
@@ -132,6 +166,32 @@
                 <el-option label="Alpha158vwap" value="Alpha158vwap" />
                 <el-option label="Alpha360vwap" value="Alpha360vwap" />
               </el-option-group>
+            </el-select>
+          </div>
+          <div class="config-item">
+            <div class="label-with-help">
+              <label class="config-label">预测周期</label>
+              <el-tooltip placement="top" effect="light">
+                <template #content>
+                  <div class="param-tooltip">
+                    <strong>预测周期选择</strong><br/>
+                    选择模型预测的目标收益率周期。<br/><br/>
+                    <strong>选项说明：</strong><br/>
+                    • 次日(1天)：预测明日收益率，信号频率高但噪声大<br/>
+                    • 周(5天)：预测5日收益率，信噪比较好（推荐）<br/>
+                    • 双周(10天)：预测10日收益率<br/>
+                    • 月(20天)：预测20日收益率，信号稳定但频率低<br/><br/>
+                    <strong>推荐：</strong> 5日（信噪比最佳，适合大多数策略）
+                  </div>
+                </template>
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </div>
+            <el-select v-model="config.label_horizon" class="config-select">
+              <el-option label="次日收益率 (1天)" :value="1" />
+              <el-option label="周收益率 (5天) ⭐推荐" :value="5" />
+              <el-option label="双周收益率 (10天)" :value="10" />
+              <el-option label="月收益率 (20天)" :value="20" />
             </el-select>
           </div>
           <div class="config-item">
@@ -249,9 +309,9 @@
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <span class="slider-value">{{ config.max_depth }}</span>
+              <span class="slider-value">{{ config.max_depth === -1 ? '不限制' : config.max_depth }}</span>
             </div>
-            <el-slider v-model="config.max_depth" :min="3" :max="15" :step="1" />
+            <el-slider v-model="config.max_depth" :min="-1" :max="15" :step="1" />
           </div>
           <div class="param-slider">
             <div class="slider-header">
@@ -368,9 +428,9 @@
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <span class="slider-value">{{ config.num_threads }}</span>
+              <span class="slider-value">{{ config.num_threads === -1 ? '全部核心' : config.num_threads }}</span>
             </div>
-            <el-slider v-model="config.num_threads" :min="1" :max="16" :step="1" />
+            <el-slider v-model="config.num_threads" :min="-1" :max="16" :step="1" />
           </div>
         </div>
         
@@ -425,10 +485,57 @@
 
     <!-- 操作区 -->
     <div class="action-section">
+      <!-- 训练模式选择 -->
+      <div v-if="!isDLModel()" class="train-mode-section">
+        <div class="mode-toggle">
+          <button :class="['mode-btn', { active: trainMode === 'normal' }]" @click="trainMode = 'normal'">
+            <span>🚀</span> 普通训练
+          </button>
+          <button :class="['mode-btn', { active: trainMode === 'rolling' }]" @click="trainMode = 'rolling'">
+            <span>🔄</span> 滚动训练
+          </button>
+        </div>
+        <div v-if="trainMode === 'rolling'" class="rolling-config">
+          <div class="rolling-info">
+            <span class="info-badge">💡</span>
+            <span>滚动训练会按步长切分测试期，每个窗口重新训练模型，合并预测后计算整体IC/ICIR，通常能显著提升效果。</span>
+          </div>
+          
+          <!-- 滚动训练时间窗口说明 -->
+          <div class="rolling-time-explain">
+            <div class="explain-title">📅 滚动训练时间窗口说明</div>
+            <div class="explain-content">
+              <p><strong>时间分段逻辑：</strong></p>
+              <ul>
+                <li><strong>训练期：</strong>从「训练开始」到「测试开始」之前，但每轮会提前 <code>label_horizon + 6</code> 天截断，防止未来函数</li>
+                <li><strong>验证期：</strong>取训练期最后 20% 作为验证集（至少60天）</li>
+                <li><strong>测试期：</strong>按「滚动步长」切分，每轮测试一个窗口</li>
+              </ul>
+              <p><strong>示例（当前设置）：</strong></p>
+              <div class="time-example">
+                <div class="time-line">
+                  <div class="time-segment train">训练期<br>{{ config.train_start_date }} ~ {{ getRollingTrainEnd() }}</div>
+                  <div class="time-segment gap">安全间隙<br>label_horizon + 6天</div>
+                  <div class="time-segment test">测试期<br>{{ config.test_start_date }} ~ {{ config.test_end_date }}</div>
+                </div>
+                <p class="example-note">每轮滚动：训练至「测试窗口开始 - {{ (config.label_horizon || 5) + 6 }}天」→ 预测「测试窗口」</p>
+              </div>
+              <p class="warning-note">⚠️ 注意：滚动训练的 train_end 是动态计算的，不等于您设置的「训练结束」日期</p>
+            </div>
+          </div>
+          
+          <div class="rolling-param">
+            <label class="config-label">滚动步长（交易日）</label>
+            <el-input-number v-model="rollingStep" :min="5" :max="60" :step="5" />
+            <span class="hint-text">20≈一个月，40≈两个月</span>
+          </div>
+        </div>
+      </div>
+
       <button class="train-btn" :class="{ training: training }" :disabled="training" @click="trainModel">
         <span v-if="!training" class="btn-content">
-          <span class="btn-icon">🚀</span>
-          <span>开始训练模型</span>
+          <span class="btn-icon">{{ trainMode === 'rolling' && !isDLModel() ? '🔄' : '🚀' }}</span>
+          <span>{{ trainMode === 'rolling' && !isDLModel() ? '开始滚动训练' : '开始训练模型' }}</span>
         </span>
         <span v-else class="btn-content">
           <span class="btn-spinner"></span>
@@ -483,23 +590,27 @@ const messageType = ref('success')
 const config = reactive({
   market: 'csi300',
   benchmark: 'SH000300',
-  train_start_date: '2016-01-01',
+  train_start_date: '',
   train_end_date: '',
   valid_start_date: '',
   valid_end_date: '',
   test_start_date: '',
   test_end_date: yesterdayDate,
   handler_type: 'Alpha158',
-  model_type: 'DEnsembleModel',
-  lr: 0.2,
-  max_depth: 8,
-  num_leaves: 210,
-  subsample: 0.8789,
-  colsample_bytree: 0.8879,
+  label_horizon: 5,
+  model_type: 'LGBModel',
+  lr: 0.05,
+  max_depth: -1,
+  num_leaves: 64,
+  subsample: 0.8,
+  colsample_bytree: 0.8,
   seed: 42,
-  num_threads: 1,
+  num_threads: -1,
   use_all_features: false
 })
+
+const trainMode = ref('normal')  // 'normal' | 'rolling'
+const rollingStep = ref(20)
 
 const dlModels = ['LSTM', 'GRU', 'ALSTM', 'DNN', 'GATs', 'TCN', 'SFM', 'TabnetModel']
 const isDLModel = () => dlModels.includes(config.model_type)
@@ -628,17 +739,32 @@ const currentDLParams = computed(() => {
 const getMarketLabel = (market) => marketLabels[market] || market
 const getModelLabel = (model) => modelLabels[model] || model
 
+// 计算滚动训练的实际训练结束日期（考虑安全间隙）
+const getRollingTrainEnd = () => {
+  if (!config.test_start_date) return '计算中...'
+  const testStart = new Date(config.test_start_date)
+  const safeGap = (config.label_horizon || 5) + 6
+  const trainEnd = new Date(testStart)
+  trainEnd.setDate(trainEnd.getDate() - safeGap)
+  return formatDate(trainEnd)
+}
+
 onMounted(() => {
   const today = new Date()
   const yesterday = new Date(today)
   yesterday.setDate(yesterday.getDate() - 1)
-  const oneYearAgo = new Date(yesterday)
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+  // 推荐滚动窗口: 训练2年, 验证2个月, 测试3个月
+  const twoYearsAgo = new Date(yesterday)
+  twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2)
+  const fiveMonthsAgo = new Date(yesterday)
+  fiveMonthsAgo.setMonth(fiveMonthsAgo.getMonth() - 5)
   const threeMonthsAgo = new Date(yesterday)
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
 
-  config.train_end_date = formatDate(oneYearAgo)
-  config.valid_start_date = formatDate(oneYearAgo)
+  config.train_start_date = formatDate(twoYearsAgo)
+  config.train_end_date = formatDate(fiveMonthsAgo)
+  config.valid_start_date = formatDate(fiveMonthsAgo)
   config.valid_end_date = formatDate(threeMonthsAgo)
   config.test_start_date = formatDate(threeMonthsAgo)
   config.test_end_date = formatDate(yesterday)
@@ -691,7 +817,30 @@ const trainModel = async () => {
         step_len: modelParams.step_len,
         seed: config.seed,
         GPU: 0,
-        use_all_features: config.use_all_features
+        use_all_features: config.use_all_features,
+        label_horizon: config.label_horizon
+      }
+    } else if (trainMode.value === 'rolling') {
+      // 滚动训练模式
+      apiUrl = `${API_BASE_URL}/qlib/train_rolling_stream`
+      requestBody = {
+        market: config.market,
+        benchmark: config.benchmark,
+        train_start_date: config.train_start_date,
+        train_end_date: config.train_end_date,
+        test_start_date: config.test_start_date,
+        test_end_date: config.test_end_date,
+        model_type: config.model_type,
+        lr: config.lr,
+        max_depth: config.max_depth,
+        num_leaves: config.num_leaves,
+        subsample: config.subsample,
+        colsample_bytree: config.colsample_bytree,
+        seed: config.seed,
+        num_threads: config.num_threads,
+        handler_type: config.handler_type,
+        label_horizon: config.label_horizon,
+        rolling_step: rollingStep.value,
       }
     } else {
       // 传统机器学习模型使用原有 API
@@ -932,6 +1081,90 @@ const trainModel = async () => {
   gap: 24px;
 }
 
+/* 训练模式选择 */
+.train-mode-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 600px;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 0;
+  background: #f0f2f5;
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.mode-btn {
+  padding: 10px 24px;
+  border: none;
+  background: transparent;
+  color: #5a6d7e;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.mode-btn:hover:not(.active) {
+  background: #e4e8ec;
+}
+
+.rolling-config {
+  width: 100%;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 12px;
+  padding: 16px 20px;
+  border: 1px solid #bae6fd;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rolling-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: #0c4a6e;
+  line-height: 1.6;
+}
+
+.info-badge {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.rolling-param {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rolling-param .config-label {
+  white-space: nowrap;
+}
+
+.rolling-param .hint-text {
+  font-size: 11px;
+  color: #8a94a6;
+  white-space: nowrap;
+}
+
 .train-btn {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -1127,5 +1360,69 @@ const trainModel = async () => {
   border-radius: 6px;
   font-size: 12px;
   color: #8b6914;
+}
+
+/* A股风格信息面板 */
+.info-block {
+  border-left: 4px solid #409eff;
+}
+
+.info-content {
+  padding: 4px 0;
+}
+
+.info-summary {
+  font-size: 13px;
+  color: #4a5568;
+  line-height: 1.8;
+  margin-bottom: 12px;
+}
+
+.style-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.style-table th {
+  background: #f1f5f9;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #334155;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.style-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #475569;
+}
+
+.style-table tr:hover td {
+  background: #f8fafc;
+}
+
+.info-tips {
+  background: #f0f9ff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.info-tips p {
+  margin: 0 0 6px 0;
+}
+
+.info-tips ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.info-tips li {
+  margin: 4px 0;
+  line-height: 1.6;
 }
 </style>

@@ -1133,6 +1133,32 @@ class QlibService:
             是否只交易可买卖的股票
         """
         try:
+            # 获取训练参数，检查日期重叠
+            recorder = R.get_recorder(recorder_id=recorder_id, experiment_name="train_model")
+            train_params = recorder.list_params()
+            train_end = train_params.get('fit_end_time')
+            
+            if train_end:
+                backtest_start = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+                train_end_date = datetime.datetime.strptime(train_end, '%Y-%m-%d')
+                
+                # 获取 label_horizon，计算安全间隙
+                label_horizon = int(train_params.get('label_horizon', 1))
+                safe_gap_days = label_horizon + 1  # label_horizon + 1 天的安全间隙
+                min_backtest_start = train_end_date + datetime.timedelta(days=safe_gap_days)
+                
+                if backtest_start <= train_end_date:
+                    return {
+                        "success": False,
+                        "message": f"回测开始日期({start_date})不能早于或等于训练结束日期({train_end})，否则会导致未来函数（数据泄露）。请调整回测开始日期。"
+                    }
+                
+                if backtest_start < min_backtest_start:
+                    return {
+                        "success": False,
+                        "message": f"回测开始日期({start_date})与训练结束日期({train_end})之间需要至少 {safe_gap_days} 天的安全间隙（考虑 label_horizon={label_horizon}），以避免标签计算导致的数据泄露。建议回测开始日期不早于 {min_backtest_start.strftime('%Y-%m-%d')}。"
+                    }
+            
             # 设置随机种子，确保回测结果可复现
             import random
             import numpy as np
@@ -1151,7 +1177,6 @@ class QlibService:
             print(f"[回测] 设置随机种子: {seed}")
             
             # 获取指定ID的记录器
-            recorder = R.get_recorder(recorder_id=recorder_id, experiment_name="train_model")
             
             # 获取训练参数中的model_type
             train_params = recorder.list_params()
@@ -1392,11 +1417,13 @@ class QlibService:
                 rec_id = rec.id
                 # 获取 recorder 名称，如果没有则使用 id
                 rec_name = rec_info.get('name', rec_id)
+                params = rec.list_params()
                 recorder_list.append({
                     "id": rec_id,
                     "name": rec_name,
                     "start_time": rec_info.get('start_time', '未知'),
-                    "params": rec.list_params()
+                    "train_end": params.get('fit_end_time', ''),
+                    "params": params
                 })
             
             return {"success": True, "recorders": recorder_list}
@@ -1470,7 +1497,8 @@ class QlibService:
                     'amount': pos['amount'],
                     'cost_price': pos['cost_price'],
                     'current_price': pos['current_price'],
-                    'hold_value': pos['hold_value']
+                    'hold_value': pos['hold_value'],
+                    'hold_days': pos.get('hold_days', 1)
                 })
         
         # 获取所有股票名称
@@ -1489,6 +1517,9 @@ class QlibService:
             first_buy_date = records[0]['date']
             last_sell_date = records[-1]['date']
             stock_name = stock_names.get(stock_code, records[0]['stock_name'])
+            
+            # 计算持股天数：每次持仓天数的汇总
+            total_hold_days = sum(int(r.get('hold_days', 1)) for r in records)
             
             # 计算累计盈亏：每次持仓的盈亏累加
             cumulative_profit = 0.0
@@ -1512,6 +1543,8 @@ class QlibService:
                 'stock_name': stock_name,
                 'first_buy_date': first_buy_date,
                 'last_sell_date': last_sell_date,
+                'hold_days': total_hold_days,
+                'trade_count': len(records),
                 'cumulative_profit': round(cumulative_profit, 2),
                 'hold_profit': round(hold_profit, 2)
             })
