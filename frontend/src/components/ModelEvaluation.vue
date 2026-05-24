@@ -68,6 +68,10 @@
           <span class="info-value">{{ evaluationResult.params?.model_type || '-' }}</span>
         </div>
         <div class="info-card">
+          <span class="info-label">预测周期</span>
+          <span class="info-value">{{ getHorizonLabel(evaluationResult.params?.label_horizon) }}</span>
+        </div>
+        <div class="info-card">
           <span class="info-label">训练日期</span>
           <span class="info-value">{{ evaluationResult.params?.train_start_date }} ~ {{ evaluationResult.params?.train_end_date }}</span>
         </div>
@@ -309,6 +313,33 @@
           <el-table-column prop="description" label="说明" />
         </el-table>
       </div>
+
+      <!-- 因子重要性 -->
+      <div class="feature-importance-section" v-if="evaluationResult.feature_importance && evaluationResult.feature_importance.length > 0">
+        <h3>因子重要性 (Top 30)</h3>
+        <div class="fi-chart-container">
+          <div ref="featureImportanceChart" class="chart-container" style="height: 500px;"></div>
+        </div>
+        <div class="fi-table-container" style="margin-top: 16px;">
+          <el-table :data="featureImportanceData" style="width: 100%" border max-height="400">
+            <el-table-column type="index" label="#" width="60" />
+            <el-table-column prop="name" label="因子名称" width="200" />
+            <el-table-column prop="importance" label="重要性" width="120">
+              <template #default="scope">
+                {{ scope.row.importance.toFixed(1) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="占比" min-width="200">
+              <template #default="scope">
+                <div class="fi-bar-wrapper">
+                  <div class="fi-bar" :style="{ width: scope.row.pct + '%' }"></div>
+                  <span class="fi-pct">{{ scope.row.pct.toFixed(1) }}%</span>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
     </div>
 
     <!-- 空状态 -->
@@ -343,11 +374,13 @@ const testReturnChart = ref(null)
 const icChart = ref(null)
 const icDistChart = ref(null)
 const monthlyIcChart = ref(null)
+const featureImportanceChart = ref(null)
 
 let testChartInstance = null
 let icChartInstance = null
 let icDistChartInstance = null
 let monthlyIcChartInstance = null
+let fiChartInstance = null
 
 // 市场标签映射
 const marketLabels = {
@@ -361,6 +394,13 @@ const marketLabels = {
 
 // 获取市场标签
 const getMarketLabel = (market) => marketLabels[market] || market || '-'
+
+// 获取预测周期标签
+const horizonLabels = { 1: '次日(1天)', 5: '周(5天)', 10: '双周(10天)', 20: '月(20天)' }
+const getHorizonLabel = (horizon) => {
+  const h = parseInt(horizon) || 1
+  return horizonLabels[h] || `${h}天`
+}
 
 // 格式化记录标签
 const formatRecorderLabel = (recorder) => {
@@ -387,6 +427,18 @@ const getMetricClass = (value) => {
   if (value === undefined || value === null) return ''
   return value >= 0 ? 'positive' : 'negative'
 }
+
+// 因子重要性表格数据
+const featureImportanceData = computed(() => {
+  const fi = evaluationResult.value?.feature_importance
+  if (!fi || !fi.length) return []
+  const total = fi.reduce((sum, item) => sum + item.importance, 0)
+  return fi.slice(0, 30).map(item => ({
+    name: item.name,
+    importance: item.importance,
+    pct: total > 0 ? (item.importance / total * 100) : 0,
+  }))
+})
 
 // 计算测试集分组收益表格数据
 const testReturnTableData = computed(() => {
@@ -468,6 +520,10 @@ const disposeCharts = () => {
     monthlyIcChartInstance.dispose()
     monthlyIcChartInstance = null
   }
+  if (fiChartInstance) {
+    fiChartInstance.dispose()
+    fiChartInstance = null
+  }
 }
 
 // 加载评估数据
@@ -522,6 +578,7 @@ const renderCharts = () => {
     renderIcChart(ic_data)
     renderIcDistChart(ic_data)
     renderMonthlyIcChart(ic_data)
+    renderFeatureImportanceChart()
   }, 100)
 }
 
@@ -851,6 +908,57 @@ const renderMonthlyIcChart = (ic_data) => {
   monthlyIcChartInstance.resize()
 }
 
+// 5. 渲染因子重要性图表
+const renderFeatureImportanceChart = () => {
+  if (!featureImportanceChart.value) return
+  const fi = evaluationResult.value?.feature_importance
+  if (!fi || !fi.length) return
+
+  if (fiChartInstance) {
+    fiChartInstance.dispose()
+    fiChartInstance = null
+  }
+
+  fiChartInstance = echarts.init(featureImportanceChart.value)
+
+  const top30 = fi.slice(0, 30).reverse()
+  const names = top30.map(item => item.name)
+  const values = top30.map(item => item.importance)
+
+  fiChartInstance.setOption({
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const val = params[0]
+        const total = fi.reduce((s, it) => s + it.importance, 0)
+        const pct = total > 0 ? (val.value / total * 100).toFixed(1) : 0
+        return `${val.name}<br/>重要性: ${val.value.toFixed(1)} (${pct}%)`
+      }
+    },
+    grid: { left: '20%', right: '4%', bottom: '3%', top: '3%', containLabel: true },
+    xAxis: { type: 'value', name: '重要性 (gain)' },
+    yAxis: {
+      type: 'category',
+      data: names,
+      axisLabel: { fontSize: 11 }
+    },
+    series: [{
+      type: 'bar',
+      data: values,
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+          { offset: 0, color: '#667eea' },
+          { offset: 1, color: '#764ba2' }
+        ])
+      },
+      barMaxWidth: 20,
+    }]
+  })
+
+  fiChartInstance.resize()
+}
+
 // 页面加载时获取训练记录
 onMounted(() => {
   fetchRecorders()
@@ -870,6 +978,7 @@ const handleResize = () => {
   if (icChartInstance) icChartInstance.resize()
   if (icDistChartInstance) icDistChartInstance.resize()
   if (monthlyIcChartInstance) monthlyIcChartInstance.resize()
+  if (fiChartInstance) fiChartInstance.resize()
 }
 
 // 刷新训练记录列表
@@ -1300,5 +1409,29 @@ const deleteAllRecorders = async () => {
   .recorder-select {
     max-width: none;
   }
+}
+
+.feature-importance-section {
+  margin-top: 24px;
+}
+
+.fi-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fi-bar {
+  height: 16px;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 3px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.fi-pct {
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
 }
 </style>
